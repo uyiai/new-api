@@ -10,7 +10,6 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -84,48 +83,36 @@ func TestResolveChannelTestUserIDUsesRequestUser(t *testing.T) {
 	require.Equal(t, 2, userID)
 }
 
-func TestResolveChannelTestModelSelectsConfiguredAnthropicModel(t *testing.T) {
-	withModelRatioConfig(t, map[string]float64{
-		"claude-3-sonnet-20240229":   1.5,
-		"claude-3-7-sonnet-20250219": 1.5,
-	})
-
-	unconfiguredTestModel := "claude-unpriced-test-model"
+func TestResolveChannelTestModelUsesRequestedModel(t *testing.T) {
 	channel := &model.Channel{
-		Type:      constant.ChannelTypeAnthropic,
-		TestModel: &unconfiguredTestModel,
-		Models:    "claude-3-sonnet-20240229,claude-unpriced-test-model,claude-3-7-sonnet-20250219",
+		Type:   constant.ChannelTypeAnthropic,
+		Models: "claude-3-7-sonnet-20250219",
 	}
 
-	require.Equal(t, "claude-3-7-sonnet-20250219", resolveChannelTestModel(channel, ""))
-	require.Equal(t, "claude-unpriced-test-model", resolveChannelTestModel(channel, " claude-unpriced-test-model "))
+	require.Equal(t, "claude-custom-test-model", resolveChannelTestModel(channel, " claude-custom-test-model "))
 }
 
-func TestResolveChannelTestModelUsesConfiguredAnthropicTestModel(t *testing.T) {
-	withModelRatioConfig(t, map[string]float64{
-		"claude-3-5-sonnet-20241022": 1.5,
-		"claude-3-7-sonnet-20250219": 1.5,
-	})
-
-	testModel := "claude-3-5-sonnet-20241022"
+func TestResolveChannelTestModelPreservesConfiguredTestModel(t *testing.T) {
+	testModel := "claude-unpriced-test-model"
 	channel := &model.Channel{
 		Type:      constant.ChannelTypeAnthropic,
 		TestModel: &testModel,
 		Models:    "claude-3-7-sonnet-20250219,claude-3-5-sonnet-20241022",
 	}
 
-	require.Equal(t, "claude-3-5-sonnet-20241022", resolveChannelTestModel(channel, ""))
+	require.Equal(t, "claude-unpriced-test-model", resolveChannelTestModel(channel, ""))
 }
 
-func withModelRatioConfig(t *testing.T, ratios map[string]float64) {
-	t.Helper()
+func TestResolveChannelTestModelUsesFirstModelWithoutPriceFiltering(t *testing.T) {
+	channel := &model.Channel{
+		Type:   constant.ChannelTypeAnthropic,
+		Models: "claude-3-sonnet-20240229,claude-3-7-sonnet-20250219",
+	}
 
-	saved := ratio_setting.ModelRatio2JSONString()
-	t.Cleanup(func() {
-		require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(saved))
-	})
+	require.Equal(t, "claude-3-sonnet-20240229", resolveChannelTestModel(channel, ""))
+}
 
-	payload, err := common.Marshal(ratios)
-	require.NoError(t, err)
-	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(string(payload)))
+func TestResolveChannelTestModelFallbacksToDefault(t *testing.T) {
+	require.Equal(t, "gpt-4o-mini", resolveChannelTestModel(nil, ""))
+	require.Equal(t, "gpt-4o-mini", resolveChannelTestModel(&model.Channel{}, ""))
 }

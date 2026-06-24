@@ -43,17 +43,6 @@ type testResult struct {
 	newAPIError *types.NewAPIError
 }
 
-var preferredAnthropicChannelTestModels = []string{
-	"claude-sonnet-4-5-20250929",
-	"claude-sonnet-4-20250514",
-	"claude-3-7-sonnet-20250219",
-	"claude-3-5-sonnet-20241022",
-}
-
-var deprecatedAnthropicChannelTestModels = map[string]bool{
-	"claude-3-sonnet-20240229": true,
-}
-
 func resolveChannelTestModel(channel *model.Channel, requestedModel string) string {
 	requestedModel = strings.TrimSpace(requestedModel)
 	if requestedModel != "" {
@@ -62,63 +51,17 @@ func resolveChannelTestModel(channel *model.Channel, requestedModel string) stri
 	if channel == nil {
 		return "gpt-4o-mini"
 	}
-	if channel.Type == constant.ChannelTypeAnthropic {
-		if modelName := defaultAnthropicChannelTestModel(channel); modelName != "" {
+	if channel.TestModel != nil {
+		if modelName := strings.TrimSpace(*channel.TestModel); modelName != "" {
 			return modelName
 		}
 	}
-	if channel.TestModel != nil && strings.TrimSpace(*channel.TestModel) != "" {
-		return strings.TrimSpace(*channel.TestModel)
-	}
-	models := channel.GetModels()
-	if len(models) > 0 {
-		if modelName := strings.TrimSpace(models[0]); modelName != "" {
+	for _, modelName := range channel.GetModels() {
+		if modelName = strings.TrimSpace(modelName); modelName != "" {
 			return modelName
 		}
 	}
 	return "gpt-4o-mini"
-}
-
-func defaultAnthropicChannelTestModel(channel *model.Channel) string {
-	if channel == nil {
-		return ""
-	}
-	if channel.TestModel != nil {
-		if modelName := strings.TrimSpace(*channel.TestModel); isUsableAnthropicChannelTestModel(modelName) {
-			return modelName
-		}
-	}
-
-	availableModels := make(map[string]bool)
-	orderedModels := make([]string, 0)
-	for _, modelName := range channel.GetModels() {
-		modelName = strings.TrimSpace(modelName)
-		if modelName == "" || availableModels[modelName] {
-			continue
-		}
-		availableModels[modelName] = true
-		orderedModels = append(orderedModels, modelName)
-	}
-
-	for _, modelName := range preferredAnthropicChannelTestModels {
-		if availableModels[modelName] && isUsableAnthropicChannelTestModel(modelName) {
-			return modelName
-		}
-	}
-	for _, modelName := range orderedModels {
-		if isUsableAnthropicChannelTestModel(modelName) {
-			return modelName
-		}
-	}
-	return ""
-}
-
-func isUsableAnthropicChannelTestModel(modelName string) bool {
-	modelName = strings.TrimSpace(modelName)
-	if modelName == "" || deprecatedAnthropicChannelTestModels[modelName] {
-		return false
-	}
-	return helper.HasModelBillingConfig(modelName)
 }
 
 func normalizeChannelTestEndpoint(channel *model.Channel, modelName, endpointType string) string {
@@ -923,11 +866,14 @@ func TestChannel(c *gin.Context) {
 	}
 	tik := time.Now()
 	result := testChannel(channel, testUserID, testModel, endpointType, isStream)
+	milliseconds := time.Since(tik).Milliseconds()
+	go channel.UpdateResponseTime(milliseconds)
+	consumedTime := float64(milliseconds) / 1000.0
 	if result.localErr != nil {
 		resp := gin.H{
 			"success": false,
 			"message": result.localErr.Error(),
-			"time":    0.0,
+			"time":    consumedTime,
 		}
 		if result.newAPIError != nil {
 			resp["error_code"] = result.newAPIError.GetErrorCode()
@@ -935,10 +881,6 @@ func TestChannel(c *gin.Context) {
 		c.JSON(http.StatusOK, resp)
 		return
 	}
-	tok := time.Now()
-	milliseconds := tok.Sub(tik).Milliseconds()
-	go channel.UpdateResponseTime(milliseconds)
-	consumedTime := float64(milliseconds) / 1000.0
 	if result.newAPIError != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success":    false,

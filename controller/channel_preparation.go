@@ -101,6 +101,7 @@ func validateChannelPreparationInput(preparation *model.ChannelPreparation, isCr
 		preparation.Group = "default"
 	}
 	applyChannelPreparationDefaults(preparation)
+	model.NormalizeDirectAnthropicPreparationModels(preparation)
 	if preparation.Remark != nil && len(*preparation.Remark) > 255 {
 		return fmt.Errorf("remark is too long")
 	}
@@ -216,6 +217,7 @@ func TestChannelPreparation(c *gin.Context) {
 		return
 	}
 	applyChannelPreparationDefaults(&preparation)
+	model.NormalizeDirectAnthropicPreparationModels(&preparation)
 	channel := preparation.ToChannel()
 	testModel := strings.TrimSpace(c.Query("model"))
 	endpointType := c.Query("endpoint_type")

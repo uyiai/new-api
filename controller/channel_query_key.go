@@ -117,6 +117,7 @@ func buildQueryKeyTestChannel(source string, targetID int, key string) (*model.C
 		testChannel.Key = key
 		testChannel.Keys = nil
 		testChannel.ChannelInfo = model.ChannelInfo{}
+		model.NormalizeDirectAnthropicChannelModels(&testChannel)
 		return &testChannel, nil
 	case model.QueryKeyReportSourcePreparation:
 		var preparation model.ChannelPreparation
@@ -127,11 +128,13 @@ func buildQueryKeyTestChannel(source string, targetID int, key string) (*model.C
 			return nil, errors.New("key不属于该备货渠道")
 		}
 		applyChannelPreparationDefaults(&preparation)
+		model.NormalizeDirectAnthropicPreparationModels(&preparation)
 		testChannel := preparation.ToChannel()
 		testChannel.Id = preparation.Id
 		testChannel.Key = key
 		testChannel.Keys = nil
 		testChannel.ChannelInfo = model.ChannelInfo{}
+		model.NormalizeDirectAnthropicChannelModels(testChannel)
 		return testChannel, nil
 	default:
 		return nil, errors.New("source不支持")
