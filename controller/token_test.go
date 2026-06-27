@@ -48,21 +48,21 @@ type sqliteColumnInfo struct {
 }
 
 type legacyToken struct {
-	Id                 int            `gorm:"primaryKey"`
-	UserId             int            `gorm:"index"`
-	Key                string         `gorm:"column:key;type:char(48);uniqueIndex"`
-	Status             int            `gorm:"default:1"`
-	Name               string         `gorm:"index"`
-	CreatedTime        int64          `gorm:"bigint"`
-	AccessedTime       int64          `gorm:"bigint"`
-	ExpiredTime        int64          `gorm:"bigint;default:-1"`
-	RemainQuota        int            `gorm:"default:0"`
+	Id                 int    `gorm:"primaryKey"`
+	UserId             int    `gorm:"index"`
+	Key                string `gorm:"column:key;type:char(48);uniqueIndex"`
+	Status             int    `gorm:"default:1"`
+	Name               string `gorm:"index"`
+	CreatedTime        int64  `gorm:"bigint"`
+	AccessedTime       int64  `gorm:"bigint"`
+	ExpiredTime        int64  `gorm:"bigint;default:-1"`
+	RemainQuota        int    `gorm:"default:0"`
 	UnlimitedQuota     bool
 	ModelLimitsEnabled bool
-	ModelLimits        string         `gorm:"type:text"`
-	AllowIps           *string        `gorm:"default:''"`
-	UsedQuota          int            `gorm:"default:0"`
-	Group              string         `gorm:"column:group;default:''"`
+	ModelLimits        string  `gorm:"type:text"`
+	AllowIps           *string `gorm:"default:''"`
+	UsedQuota          int     `gorm:"default:0"`
+	Group              string  `gorm:"column:group;default:''"`
 	CrossGroupRetry    bool
 	DeletedAt          gorm.DeletedAt `gorm:"index"`
 }
@@ -101,8 +101,8 @@ func openTokenControllerTestDB(t *testing.T) *gorm.DB {
 func migrateTokenControllerTestDB(t *testing.T, db *gorm.DB) {
 	t.Helper()
 
-	if err := db.AutoMigrate(&model.Token{}); err != nil {
-		t.Fatalf("failed to migrate token table: %v", err)
+	if err := db.AutoMigrate(&model.Token{}, &model.Log{}); err != nil {
+		t.Fatalf("failed to migrate token test tables: %v", err)
 	}
 }
 
@@ -506,6 +506,53 @@ func TestUpdateTokenMasksKeyInResponse(t *testing.T) {
 	}
 }
 
+func TestGetTokenKeysBatchRecordsAuditLogWithoutLeakingKeys(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	tokenA := seedToken(t, db, 1, "owned-token-a", "owner1234tokenaaaa")
+	tokenB := seedToken(t, db, 1, "owned-token-b", "owner1234tokenbbbb")
+	otherToken := seedToken(t, db, 2, "other-token", "other1234tokencccc")
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodPost, "/api/token/batch/keys", TokenBatch{Ids: []int{tokenA.Id, tokenB.Id, otherToken.Id}}, 1)
+	GetTokenKeysBatch(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	if !response.Success {
+		t.Fatalf("expected batch key fetch to succeed, got message: %s", response.Message)
+	}
+
+	var batchData struct {
+		Keys map[int]string `json:"keys"`
+	}
+	if err := common.Unmarshal(response.Data, &batchData); err != nil {
+		t.Fatalf("failed to decode batch key response: %v", err)
+	}
+	if len(batchData.Keys) != 2 {
+		t.Fatalf("expected two owned keys, got %d", len(batchData.Keys))
+	}
+	if batchData.Keys[tokenA.Id] != tokenA.GetFullKey() || batchData.Keys[tokenB.Id] != tokenB.GetFullKey() {
+		t.Fatalf("batch response did not include expected owned keys")
+	}
+	if _, ok := batchData.Keys[otherToken.Id]; ok {
+		t.Fatalf("batch response leaked another user's token key")
+	}
+
+	var logs []model.Log
+	if err := db.Where("user_id = ? AND type = ?", 1, model.LogTypeSystem).Find(&logs).Error; err != nil {
+		t.Fatalf("failed to query audit logs: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected one audit log, got %d", len(logs))
+	}
+	if !strings.Contains(logs[0].Content, "批量查看令牌密钥信息") || !strings.Contains(logs[0].Content, "数量: 2") {
+		t.Fatalf("unexpected audit log content: %s", logs[0].Content)
+	}
+	for _, token := range []*model.Token{tokenA, tokenB, otherToken} {
+		if strings.Contains(logs[0].Content, token.Key) || strings.Contains(logs[0].Content, token.GetFullKey()) {
+			t.Fatalf("audit log leaked raw token key: %s", logs[0].Content)
+		}
+	}
+}
+
 func TestGetTokenKeyRequiresOwnershipAndReturnsFullKey(t *testing.T) {
 	db := setupTokenControllerTestDB(t)
 	token := seedToken(t, db, 1, "owned-token", "owner1234token5678")
@@ -525,6 +572,20 @@ func TestGetTokenKeyRequiresOwnershipAndReturnsFullKey(t *testing.T) {
 	}
 	if keyData.Key != token.GetFullKey() {
 		t.Fatalf("expected full key %q, got %q", token.GetFullKey(), keyData.Key)
+	}
+
+	var logs []model.Log
+	if err := db.Where("user_id = ? AND type = ?", 1, model.LogTypeSystem).Find(&logs).Error; err != nil {
+		t.Fatalf("failed to query audit logs: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected one audit log, got %d", len(logs))
+	}
+	if !strings.Contains(logs[0].Content, "查看令牌密钥信息") || !strings.Contains(logs[0].Content, strconv.Itoa(token.Id)) {
+		t.Fatalf("unexpected audit log content: %s", logs[0].Content)
+	}
+	if strings.Contains(logs[0].Content, token.Key) || strings.Contains(logs[0].Content, token.GetFullKey()) {
+		t.Fatalf("audit log leaked raw token key: %s", logs[0].Content)
 	}
 
 	unauthorizedCtx, unauthorizedRecorder := newAuthenticatedContext(t, http.MethodPost, "/api/token/"+strconv.Itoa(token.Id)+"/key", nil, 2)

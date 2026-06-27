@@ -103,6 +103,7 @@ const PersonalSetting = () => {
     verificationState: passkeyVerificationState,
     startVerification: startPasskeyVerification,
     executeVerification: executePasskeyVerification,
+    withVerification: withSecureVerification,
     cancelVerification: cancelPasskeyVerification,
     setVerificationCode: setPasskeyVerificationCode,
     switchVerificationMethod: switchPasskeyVerificationMethod,
@@ -206,8 +207,8 @@ const PersonalSetting = () => {
     setInputs((inputs) => ({ ...inputs, [name]: value }));
   };
 
-  const generateAccessToken = async () => {
-    const res = await API.get('/api/user/token');
+  const generateAccessTokenRequest = async () => {
+    const res = await API.post('/api/user/token');
     const { success, message, data } = res.data;
     if (success) {
       setSystemToken(data);
@@ -215,6 +216,19 @@ const PersonalSetting = () => {
       showSuccess(t('令牌已重置并已复制到剪贴板'));
     } else {
       showError(message);
+    }
+    return res.data;
+  };
+
+  const generateAccessToken = async () => {
+    try {
+      await withSecureVerification(generateAccessTokenRequest, {
+        preferredMethod: 'passkey',
+        title: t('安全验证'),
+        description: t('生成系统访问令牌前需要完成安全验证。'),
+      });
+    } catch (error) {
+      showError(error?.message || t('生成系统访问令牌失败'));
     }
   };
 

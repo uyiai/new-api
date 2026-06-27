@@ -99,6 +99,10 @@ func setupLogin(user *model.User, c *gin.Context) {
 	session.Set("role", user.Role)
 	session.Set("status", user.Status)
 	session.Set("group", user.Group)
+	session.Delete(SecureVerificationSessionKey)
+	session.Delete(secureVerificationMethodSessionKey)
+	session.Delete(secureVerificationUserIDSessionKey)
+	session.Delete(PasskeyReadySessionKey)
 	err := session.Save()
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgUserSessionSaveFailed)
@@ -330,6 +334,8 @@ func GenerateAccessToken(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+
+	model.RecordLog(id, model.LogTypeSystem, "重新生成系统访问令牌")
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

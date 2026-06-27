@@ -99,13 +99,19 @@ export function useSecureVerification(
         return false
       }
 
-      let defaultMethod: VerificationMethod | null = preferredMethod ?? null
-      if (!defaultMethod) {
-        if (availableMethods.hasPasskey && availableMethods.passkeySupported) {
-          defaultMethod = 'passkey'
-        } else if (availableMethods.has2FA) {
-          defaultMethod = '2fa'
-        }
+      let defaultMethod: VerificationMethod | null = null
+      if (
+        preferredMethod === 'passkey' &&
+        availableMethods.hasPasskey &&
+        availableMethods.passkeySupported
+      ) {
+        defaultMethod = 'passkey'
+      } else if (preferredMethod === '2fa' && availableMethods.has2FA) {
+        defaultMethod = '2fa'
+      } else if (availableMethods.hasPasskey && availableMethods.passkeySupported) {
+        defaultMethod = 'passkey'
+      } else if (availableMethods.has2FA) {
+        defaultMethod = '2fa'
       }
 
       setState((prev) => ({

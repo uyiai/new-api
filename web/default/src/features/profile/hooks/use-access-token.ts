@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useState, useCallback } from 'react'
 import i18next from 'i18next'
 import { toast } from 'sonner'
+import { useSecureVerification } from '@/features/auth/secure-verification'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { generateAccessToken } from '../api'
 
@@ -30,11 +31,20 @@ export function useAccessToken() {
   const [token, setToken] = useState<string>('')
   const [generating, setGenerating] = useState(false)
   const { copyToClipboard } = useCopyToClipboard({ notify: false })
+  const {
+    open: verificationOpen,
+    methods: verificationMethods,
+    state: verificationState,
+    executeVerification,
+    cancel: cancelVerification,
+    setCode: setVerificationCode,
+    switchMethod: switchVerificationMethod,
+    withVerification,
+  } = useSecureVerification()
 
-  // Generate new access token
-  const generate = useCallback(async (): Promise<boolean> => {
+  const generateRequest = useCallback(async (): Promise<boolean> => {
+    setGenerating(true)
     try {
-      setGenerating(true)
       const response = await generateAccessToken()
 
       if (response.success && response.data) {
@@ -46,19 +56,46 @@ export function useAccessToken() {
 
       toast.error(response.message || i18next.t('Failed to generate token'))
       return false
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error('Failed to generate token:', error)
-      toast.error(i18next.t('Failed to generate token'))
-      return false
     } finally {
       setGenerating(false)
     }
   }, [copyToClipboard])
 
+  // Generate new access token
+  const generate = useCallback(async (): Promise<boolean> => {
+    try {
+      const result = await withVerification(generateRequest, {
+        preferredMethod: 'passkey',
+        title: i18next.t('Verify to generate access token'),
+        description: i18next.t(
+          'Confirm your identity before regenerating your system access token.'
+        ),
+      })
+      return result === null ? false : Boolean(result)
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('Failed to generate token:', error)
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : i18next.t('Failed to generate token')
+      )
+      return false
+    }
+  }, [generateRequest, withVerification])
+
   return {
     token,
-    generating,
+    generating: generating || verificationState.loading,
     generate,
+    verification: {
+      open: verificationOpen,
+      methods: verificationMethods,
+      state: verificationState,
+      execute: executeVerification,
+      cancel: cancelVerification,
+      setCode: setVerificationCode,
+      switchMethod: switchVerificationMethod,
+    },
   }
 }

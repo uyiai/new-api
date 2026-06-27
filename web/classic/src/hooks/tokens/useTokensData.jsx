@@ -29,12 +29,14 @@ import {
 } from '../../helpers';
 import { ITEMS_PER_PAGE } from '../../constants';
 import { useTableCompactMode } from '../common/useTableCompactMode';
+import { useSecureVerification } from '../common/useSecureVerification';
 import {
   fetchTokenKey as fetchTokenKeyById,
   fetchTokenKeysBatch,
   getServerAddress,
   encodeChannelConnectionString,
 } from '../../helpers/token';
+import { isVerificationRequiredError } from '../../helpers/secureApiCall';
 
 export const useTokensData = (openFluentNotification, openCCSwitchModal) => {
   const { t } = useTranslation();
@@ -64,12 +66,85 @@ export const useTokensData = (openFluentNotification, openCCSwitchModal) => {
   const [resolvedTokenKeys, setResolvedTokenKeys] = useState({});
   const [loadingTokenKeys, setLoadingTokenKeys] = useState({});
   const keyRequestsRef = useRef({});
+  const pendingKeyExportRef = useRef(null);
 
   // Form state
   const [formApi, setFormApi] = useState(null);
   const formInitValues = {
     searchKeyword: '',
     searchToken: '',
+  };
+
+  const resolvePendingKeyExport = (result) => {
+    const pending = pendingKeyExportRef.current;
+    if (!pending) {
+      return;
+    }
+
+    if (result?.success && pending.parseResult) {
+      try {
+        pending.resolve(pending.parseResult(result));
+      } catch (error) {
+        pending.reject(error);
+      }
+    } else {
+      pending.reject(new Error(result?.message || t('获取令牌密钥失败')));
+    }
+    pendingKeyExportRef.current = null;
+  };
+
+  const rejectPendingKeyExport = (error) => {
+    const pending = pendingKeyExportRef.current;
+    if (pending) {
+      pending.reject(error instanceof Error ? error : new Error(t('安全验证失败')));
+      pendingKeyExportRef.current = null;
+    }
+  };
+
+  const {
+    isModalVisible: isKeyVerificationVisible,
+    verificationMethods: keyVerificationMethods,
+    verificationState: keyVerificationState,
+    startVerification: startKeyVerification,
+    executeVerification: executeKeyVerification,
+    cancelVerification: cancelKeyVerificationBase,
+    setVerificationCode: setKeyVerificationCode,
+    switchVerificationMethod: switchKeyVerificationMethod,
+  } = useSecureVerification({
+    onSuccess: resolvePendingKeyExport,
+    onError: rejectPendingKeyExport,
+  });
+
+  const cancelKeyVerification = () => {
+    rejectPendingKeyExport(new Error(t('安全验证已取消')));
+    cancelKeyVerificationBase();
+  };
+
+  const requestKeyExportVerification = async ({ apiCall, parseResult, title, description }) => {
+    if (pendingKeyExportRef.current) {
+      pendingKeyExportRef.current.reject(new Error(t('已有安全验证正在进行')));
+      pendingKeyExportRef.current = null;
+    }
+
+    return new Promise(async (resolve, reject) => {
+      pendingKeyExportRef.current = { resolve, reject, parseResult };
+      try {
+        const started = await startKeyVerification(apiCall, {
+          preferredMethod: 'passkey',
+          title,
+          description,
+        });
+        if (!started && pendingKeyExportRef.current) {
+          pendingKeyExportRef.current = null;
+          reject(new Error(t('安全验证未启动')));
+        }
+      } catch (error) {
+        if (pendingKeyExportRef.current) {
+          pendingKeyExportRef.current = null;
+        }
+        reject(error);
+      }
+    });
   };
 
   // Get form values helper function
@@ -157,7 +232,29 @@ export const useTokensData = (openFluentNotification, openCCSwitchModal) => {
     const request = (async () => {
       setLoadingTokenKeys((prev) => ({ ...prev, [tokenId]: true }));
       try {
-        const fullKey = await fetchTokenKeyById(tokenId);
+        let fullKey;
+        try {
+          fullKey = await fetchTokenKeyById(tokenId);
+        } catch (error) {
+          if (!isVerificationRequiredError(error)) {
+            throw error;
+          }
+          fullKey = await requestKeyExportVerification({
+            apiCall: async () => {
+              const response = await API.post(`/api/token/${tokenId}/key`);
+              return response.data;
+            },
+            parseResult: (result) => {
+              const key = result?.data?.key;
+              if (!key) {
+                throw new Error(result?.message || t('获取令牌密钥失败'));
+              }
+              return key;
+            },
+            title: t('验证以查看令牌密钥'),
+            description: t('查看、复制或导出令牌密钥前需要完成安全验证。'),
+          });
+        }
         setResolvedTokenKeys((prev) => ({ ...prev, [tokenId]: fullKey }));
         return fullKey;
       } catch (error) {
@@ -421,7 +518,29 @@ export const useTokensData = (openFluentNotification, openCCSwitchModal) => {
     }
     try {
       const ids = selectedKeys.map((token) => token.id);
-      const keysMap = await fetchTokenKeysBatch(ids);
+      let keysMap;
+      try {
+        keysMap = await fetchTokenKeysBatch(ids);
+      } catch (error) {
+        if (!isVerificationRequiredError(error)) {
+          throw error;
+        }
+        keysMap = await requestKeyExportVerification({
+          apiCall: async () => {
+            const response = await API.post('/api/token/batch/keys', { ids });
+            return response.data;
+          },
+          parseResult: (result) => {
+            const keys = result?.data?.keys;
+            if (!keys) {
+              throw new Error(result?.message || t('批量获取令牌密钥失败'));
+            }
+            return keys;
+          },
+          title: t('验证以批量导出令牌密钥'),
+          description: t('批量复制或导出令牌密钥前需要完成安全验证。'),
+        });
+      }
 
       setResolvedTokenKeys((prev) => ({ ...prev, ...keysMap }));
 
@@ -489,6 +608,15 @@ export const useTokensData = (openFluentNotification, openCCSwitchModal) => {
     setShowKeys,
     resolvedTokenKeys,
     loadingTokenKeys,
+    keyVerification: {
+      visible: isKeyVerificationVisible,
+      methods: keyVerificationMethods,
+      state: keyVerificationState,
+      execute: executeKeyVerification,
+      cancel: cancelKeyVerification,
+      setCode: setKeyVerificationCode,
+      switchMethod: switchKeyVerificationMethod,
+    },
 
     // Form state
     formApi,

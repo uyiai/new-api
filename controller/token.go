@@ -89,6 +89,7 @@ func GetTokenKey(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	model.RecordLog(userId, model.LogTypeSystem, fmt.Sprintf("查看令牌密钥信息 (令牌ID: %d)", token.Id))
 	common.ApiSuccess(c, gin.H{
 		"key": token.GetFullKey(),
 	})
@@ -355,5 +356,23 @@ func GetTokenKeysBatch(c *gin.Context) {
 	for _, t := range tokens {
 		keysMap[t.Id] = t.GetFullKey()
 	}
+	model.RecordLog(userId, model.LogTypeSystem, fmt.Sprintf("批量查看令牌密钥信息 (数量: %d, 令牌ID: %s)", len(tokens), summarizeTokenKeyExportIDs(tokens, 20)))
 	common.ApiSuccess(c, gin.H{"keys": keysMap})
+}
+
+func summarizeTokenKeyExportIDs(tokens []model.Token, maxIDs int) string {
+	if len(tokens) == 0 || maxIDs <= 0 {
+		return ""
+	}
+	ids := make([]string, 0, min(len(tokens), maxIDs))
+	for i, token := range tokens {
+		if i >= maxIDs {
+			break
+		}
+		ids = append(ids, strconv.Itoa(token.Id))
+	}
+	if len(tokens) > maxIDs {
+		ids = append(ids, fmt.Sprintf("...+%d", len(tokens)-maxIDs))
+	}
+	return strings.Join(ids, ",")
 }

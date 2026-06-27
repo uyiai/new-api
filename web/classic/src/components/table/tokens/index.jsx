@@ -39,6 +39,7 @@ import TokensFilters from './TokensFilters';
 import TokensDescription from './TokensDescription';
 import EditTokenModal from './modals/EditTokenModal';
 import CCSwitchModal from './modals/CCSwitchModal';
+import SecureVerificationModal from '../../common/modals/SecureVerificationModal';
 import { useTokensData } from '../../../hooks/tokens/useTokensData';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
 import { createCardProPagination } from '../../../helpers/utils';
@@ -370,6 +371,7 @@ function TokensPage() {
     // Description state
     compactMode,
     setCompactMode,
+    keyVerification,
 
     // Translation
     t,
@@ -389,6 +391,18 @@ function TokensPage() {
         onClose={() => setCCSwitchVisible(false)}
         tokenKey={ccSwitchKey}
         modelOptions={modelOptions}
+      />
+
+      <SecureVerificationModal
+        visible={keyVerification.visible}
+        verificationMethods={keyVerification.methods}
+        verificationState={keyVerification.state}
+        onVerify={keyVerification.execute}
+        onCancel={keyVerification.cancel}
+        onCodeChange={keyVerification.setCode}
+        onMethodSwitch={keyVerification.switchMethod}
+        title={keyVerification.state.title}
+        description={keyVerification.state.description}
       />
 
       <CardPro

@@ -96,14 +96,20 @@ export const useSecureVerification = ({
         return false;
       }
 
-      // 设置默认验证方式
-      let defaultMethod = preferredMethod;
-      if (!defaultMethod) {
-        if (methods.hasPasskey && methods.passkeySupported) {
-          defaultMethod = 'passkey';
-        } else if (methods.has2FA) {
-          defaultMethod = '2fa';
-        }
+      // 设置默认验证方式：只有首选方式可用时才使用，否则自动回退
+      let defaultMethod = null;
+      if (
+        preferredMethod === 'passkey' &&
+        methods.hasPasskey &&
+        methods.passkeySupported
+      ) {
+        defaultMethod = 'passkey';
+      } else if (preferredMethod === '2fa' && methods.has2FA) {
+        defaultMethod = '2fa';
+      } else if (methods.hasPasskey && methods.passkeySupported) {
+        defaultMethod = 'passkey';
+      } else if (methods.has2FA) {
+        defaultMethod = '2fa';
       }
 
       setVerificationState((prev) => ({

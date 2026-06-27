@@ -24,6 +24,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { CopyButton } from '@/components/copy-button'
 import { Dialog } from '@/components/dialog'
+import { SecureVerificationDialog } from '@/features/auth/secure-verification'
 import { useAccessToken } from '../../hooks'
 
 // ============================================================================
@@ -40,7 +41,7 @@ export function AccessTokenDialog({
   onOpenChange,
 }: AccessTokenDialogProps) {
   const { t } = useTranslation()
-  const { token, generating, generate } = useAccessToken()
+  const { token, generating, generate, verification } = useAccessToken()
 
   // Auto-generate token when dialog opens if no token exists
   useEffect(() => {
@@ -50,9 +51,10 @@ export function AccessTokenDialog({
   }, [open, token, generate])
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={onOpenChange}
+    <>
+      <Dialog
+        open={open}
+        onOpenChange={onOpenChange}
       title={t('Access Token')}
       description={t(
         "Your system access token for API authentication. Keep it secure and don't share it with others."
@@ -111,6 +113,22 @@ export function AccessTokenDialog({
           </p>
         </div>
       </div>
-    </Dialog>
+      </Dialog>
+
+      <SecureVerificationDialog
+        open={verification.open}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) verification.cancel()
+        }}
+        methods={verification.methods}
+        state={verification.state}
+        onVerify={async (method, code) => {
+          await verification.execute(method, code)
+        }}
+        onCancel={verification.cancel}
+        onCodeChange={verification.setCode}
+        onMethodChange={verification.switchMethod}
+      />
+    </>
   )
 }
