@@ -16,6 +16,7 @@ import {
   buildGroupOptions,
   showError,
 } from '../../../../helpers';
+import { appendKeyFragment } from '../keyFragment';
 
 const DEFAULT_TYPE = 14;
 
@@ -111,6 +112,7 @@ const EditPreparationModal = ({ visible, preparation, onCancel, onSubmit }) => {
     try {
       const payload = {
         ...form,
+        name: appendKeyFragment(form.name.trim(), form.key),
         id: preparation?.id,
         type: Number(form.type),
         balance: Number(form.balance) || 0,

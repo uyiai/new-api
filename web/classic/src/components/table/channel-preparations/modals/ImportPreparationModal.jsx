@@ -18,6 +18,7 @@ import {
   loadChannelModels,
   showError,
 } from '../../../../helpers';
+import { appendKeyFragment } from '../keyFragment';
 
 const DEFAULT_GROUP = 'default';
 const ANTHROPIC_CHANNEL_TYPE = 14;
@@ -28,8 +29,8 @@ const generateTimestamp = () => {
   return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}`;
 };
 
-const generateChannelName = (balance, suffix, timestamp) => {
-  return `${timestamp}-${balance}-${suffix}`;
+const generateChannelName = (balance, suffix, timestamp, key) => {
+  return appendKeyFragment(`${timestamp}-${balance}-${suffix}`, key);
 };
 
 const parseBatchInput = (text, suffix, timestamp) => {
@@ -59,6 +60,7 @@ const parseBatchInput = (text, suffix, timestamp) => {
           Number.isFinite(balance) ? balance : 0,
           suffix,
           timestamp,
+          key,
         ),
         balance: Number.isFinite(balance) ? balance : 0,
         key,
