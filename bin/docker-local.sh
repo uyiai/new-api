@@ -15,7 +15,8 @@ POSTGRES_VOLUME="${POSTGRES_VOLUME:-${PROJECT_NAME}-postgres-data}"
 REDIS_VOLUME="${REDIS_VOLUME:-${PROJECT_NAME}-redis-data}"
 APP_DATA_VOLUME="${APP_DATA_VOLUME:-${PROJECT_NAME}-app-data}"
 
-HOST_PORT="${HOST_PORT:-${PORT:-3000}}"
+HOST_BIND_IP="${HOST_BIND_IP:-127.0.0.1}"
+HOST_PORT="${HOST_PORT:-${PORT:-56781}}"
 APP_PORT="${APP_PORT:-3000}"
 POSTGRES_HOST_PORT="${POSTGRES_HOST_PORT:-}"
 REDIS_HOST_PORT="${REDIS_HOST_PORT:-}"
@@ -59,7 +60,8 @@ No manual config is required. The script persists generated secrets in:
 Common environment overrides:
   PROJECT_NAME=new-api-local        Prefix for containers/network/volumes
   IMAGE_NAME=new-api:local          Docker image tag for the app
-  HOST_PORT=3000                    Host port for new-api
+  HOST_BIND_IP=127.0.0.1            Host bind address for new-api; use 0.0.0.0 only if you intentionally expose it
+  HOST_PORT=56781                   Host port for new-api, intended for reverse proxy only
   POSTGRES_HOST_PORT=5432           Optional host port for PostgreSQL
   REDIS_HOST_PORT=6379              Optional host port for Redis
   BUILD_ON_UP=0                     Skip docker build during up
@@ -78,7 +80,7 @@ Advanced overrides:
 
 Examples:
   bash bin/docker-local.sh
-  HOST_PORT=3001 bash bin/docker-local.sh up
+  HOST_PORT=56782 bash bin/docker-local.sh up
   BUILD_ON_UP=0 bash bin/docker-local.sh up
   bash bin/docker-local.sh logs
   bash bin/docker-local.sh status
@@ -355,12 +357,12 @@ run_container() {
     env_args+=(--env-file "${ENV_FILE}")
   fi
 
-  log "Starting app ${CONTAINER_NAME} on http://localhost:${HOST_PORT}"
+  log "Starting app ${CONTAINER_NAME} on http://${HOST_BIND_IP}:${HOST_PORT}"
   docker run -d \
     --name "${CONTAINER_NAME}" \
     --restart unless-stopped \
     --network "${NETWORK_NAME}" \
-    -p "${HOST_PORT}:${APP_PORT}" \
+    -p "${HOST_BIND_IP}:${HOST_PORT}:${APP_PORT}" \
     -v "${APP_DATA_VOLUME}:/data" \
     -v "${LOG_DIR}:/app/logs" \
     "${env_args[@]}" \
@@ -374,7 +376,8 @@ run_container() {
   log "Redis volume: ${REDIS_VOLUME}"
   log "App data volume: ${APP_DATA_VOLUME}"
   log "Logs dir: ${LOG_DIR}"
-  log "Open: http://localhost:${HOST_PORT}"
+  log "Open locally: http://127.0.0.1:${HOST_PORT}"
+  log "Reverse proxy upstream: http://127.0.0.1:${HOST_PORT}"
 
   if [[ "${FOLLOW_LOGS}" == "1" || "${FOLLOW_LOGS}" == "true" ]]; then
     docker logs -f "${CONTAINER_NAME}"
