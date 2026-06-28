@@ -104,8 +104,10 @@ type channelPreparationAutoPromotionSchedulerStatus struct {
 
 type channelPreparationAutoPromotionCapacityAggregate struct {
 	EligibleChannelCount int64   `gorm:"column:eligible_channel_count"`
+	UsableChannelCount   int64   `gorm:"column:usable_channel_count"`
 	BalanceSumUSD        float64 `gorm:"column:balance_sum_usd"`
 	UsedQuotaSum         int64   `gorm:"column:used_quota_sum"`
+	EffectiveCapacityUSD float64 `gorm:"column:effective_capacity_usd"`
 }
 
 var (
@@ -205,8 +207,28 @@ func computeChannelPreparationAutoPromotionCapacity(group string, channelType in
 		Where("balance > ?", 0)
 
 	var aggregate channelPreparationAutoPromotionCapacityAggregate
-	if err := query.Select("COUNT(*) AS eligible_channel_count, COALESCE(SUM(balance), 0) AS balance_sum_usd, COALESCE(SUM(used_quota), 0) AS used_quota_sum").Scan(&aggregate).Error; err != nil {
-		return channelPreparationAutoPromotionCapacitySummary{}, err
+	if common.QuotaPerUnit > 0 {
+		const capacitySelect = `
+			COUNT(*) AS eligible_channel_count,
+			COUNT(CASE WHEN balance - (used_quota * 1.0 / ?) > 0 THEN 1 END) AS usable_channel_count,
+			COALESCE(SUM(balance), 0) AS balance_sum_usd,
+			COALESCE(SUM(used_quota), 0) AS used_quota_sum,
+			COALESCE(SUM(CASE WHEN balance - (used_quota * 1.0 / ?) > 0 THEN balance - (used_quota * 1.0 / ?) ELSE 0 END), 0) AS effective_capacity_usd
+		`
+		if err := query.Select(capacitySelect, common.QuotaPerUnit, common.QuotaPerUnit, common.QuotaPerUnit).Scan(&aggregate).Error; err != nil {
+			return channelPreparationAutoPromotionCapacitySummary{}, err
+		}
+	} else {
+		const capacitySelect = `
+			COUNT(*) AS eligible_channel_count,
+			COUNT(*) AS usable_channel_count,
+			COALESCE(SUM(balance), 0) AS balance_sum_usd,
+			COALESCE(SUM(used_quota), 0) AS used_quota_sum,
+			COALESCE(SUM(balance), 0) AS effective_capacity_usd
+		`
+		if err := query.Select(capacitySelect).Scan(&aggregate).Error; err != nil {
+			return channelPreparationAutoPromotionCapacitySummary{}, err
+		}
 	}
 
 	ignoredQuery := model.DB.Model(&model.Channel{})
@@ -221,13 +243,13 @@ func computeChannelPreparationAutoPromotionCapacity(group string, channelType in
 
 	usedQuotaUSD := safeQuotaToUSD(aggregate.UsedQuotaSum)
 	rawCapacity := aggregate.BalanceSumUSD - usedQuotaUSD
-	capacity := rawCapacity
+	capacity := aggregate.EffectiveCapacityUSD
 	if capacity < 0 {
 		capacity = 0
 	}
 	return channelPreparationAutoPromotionCapacitySummary{
 		EligibleChannelCount:                  aggregate.EligibleChannelCount,
-		UsableChannelCount:                    aggregate.EligibleChannelCount,
+		UsableChannelCount:                    aggregate.UsableChannelCount,
 		IgnoredNonPositiveBalanceChannelCount: ignoredCount,
 		BalanceSumUSD:                         aggregate.BalanceSumUSD,
 		UsedQuotaUSD:                          usedQuotaUSD,

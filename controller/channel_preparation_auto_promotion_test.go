@@ -4,6 +4,8 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/stretchr/testify/require"
@@ -11,6 +13,73 @@ import (
 
 func int64Ptr(value int64) *int64 { return &value }
 func uintPtr(value uint) *uint    { return &value }
+
+func TestComputeChannelPreparationAutoPromotionCapacityClampsPerChannel(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+
+	originalQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 500000
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originalQuotaPerUnit
+	})
+
+	channelType := constant.ChannelTypeAnthropic
+	channels := []model.Channel{
+		{
+			Type:      channelType,
+			Key:       "sk-overused",
+			Name:      "overused",
+			Status:    common.ChannelStatusEnabled,
+			Group:     "vip",
+			Balance:   100,
+			UsedQuota: int64(7173 * common.QuotaPerUnit),
+		},
+		{
+			Type:      channelType,
+			Key:       "sk-healthy",
+			Name:      "healthy",
+			Status:    common.ChannelStatusEnabled,
+			Group:     "vip",
+			Balance:   5000,
+			UsedQuota: 0,
+		},
+		{
+			Type:    channelType,
+			Key:     "sk-empty",
+			Name:    "empty",
+			Status:  common.ChannelStatusEnabled,
+			Group:   "vip",
+			Balance: 0,
+		},
+		{
+			Type:    channelType,
+			Key:     "sk-other-group",
+			Name:    "other group",
+			Status:  common.ChannelStatusEnabled,
+			Group:   "svip",
+			Balance: 9999,
+		},
+		{
+			Type:    channelType,
+			Key:     "sk-disabled",
+			Name:    "disabled",
+			Status:  common.ChannelStatusManuallyDisabled,
+			Group:   "vip",
+			Balance: 9999,
+		},
+	}
+	require.NoError(t, db.Create(&channels).Error)
+
+	capacity, err := computeChannelPreparationAutoPromotionCapacity("vip", channelType)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), capacity.EligibleChannelCount)
+	require.Equal(t, int64(1), capacity.UsableChannelCount)
+	require.Equal(t, int64(1), capacity.IgnoredNonPositiveBalanceChannelCount)
+	require.InDelta(t, 5100, capacity.BalanceSumUSD, 0.000001)
+	require.InDelta(t, 7173, capacity.UsedQuotaUSD, 0.000001)
+	require.InDelta(t, -2073, capacity.RawEffectiveCapacityUSD, 0.000001)
+	require.InDelta(t, 5000, capacity.EffectiveCapacityUSD, 0.000001)
+}
 
 func TestChooseChannelPreparationAutoPromotionCandidateRespectsHighestPriorityTier(t *testing.T) {
 	preparations := []model.ChannelPreparation{
