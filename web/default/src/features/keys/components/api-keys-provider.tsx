@@ -19,12 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import React, { useState, useCallback, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import {
-  SecureVerificationDialog,
-  useSecureVerification,
-} from '@/features/auth/secure-verification'
 import useDialogState from '@/hooks/use-dialog'
-import { isVerificationRequiredError } from '@/lib/secure-verification'
 import { fetchTokenKey, fetchTokenKeysBatch } from '../api'
 import { ERROR_MESSAGES } from '../constants'
 import { type ApiKey, type ApiKeysDialogType } from '../types'
@@ -58,11 +53,6 @@ export function ApiKeysProvider({ children }: { children: React.ReactNode }) {
   const [resolvedKeys, setResolvedKeys] = useState<Record<number, string>>({})
   const [loadingKeys, setLoadingKeys] = useState<Record<number, boolean>>({})
   const pendingRequests = useRef<Record<number, Promise<string | null>>>({})
-  const pendingKeyExportRef = useRef<{
-    resolve: (value: unknown) => void
-    reject: (error: unknown) => void
-    parseResult: (result: unknown) => unknown
-  } | null>(null)
 
   const [copiedKeyId, setCopiedKeyId] = useState<number | null>(null)
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
@@ -77,87 +67,6 @@ export function ApiKeysProvider({ children }: { children: React.ReactNode }) {
     copiedTimerRef.current = setTimeout(() => setCopiedKeyId(null), 2000)
   }, [])
 
-  const resolvePendingKeyExport = useCallback((result: unknown) => {
-    const pending = pendingKeyExportRef.current
-    if (!pending) return
-
-    try {
-      pending.resolve(pending.parseResult(result))
-    } catch (error) {
-      pending.reject(error)
-    } finally {
-      pendingKeyExportRef.current = null
-    }
-  }, [])
-
-  const rejectPendingKeyExport = useCallback((error: unknown) => {
-    const pending = pendingKeyExportRef.current
-    if (!pending) return
-    pending.reject(error)
-    pendingKeyExportRef.current = null
-  }, [])
-
-  const {
-    open: verificationOpen,
-    methods: verificationMethods,
-    state: verificationState,
-    startVerification,
-    executeVerification,
-    cancel: cancelVerificationBase,
-    setCode: setVerificationCode,
-    switchMethod: switchVerificationMethod,
-  } = useSecureVerification({
-    onSuccess: resolvePendingKeyExport,
-    onError: rejectPendingKeyExport,
-  })
-
-  const cancelVerification = useCallback(() => {
-    rejectPendingKeyExport(new Error(t('Secure verification cancelled')))
-    cancelVerificationBase()
-  }, [cancelVerificationBase, rejectPendingKeyExport, t])
-
-  const requestKeyExportVerification = useCallback(
-    async ({
-      apiCall,
-      parseResult,
-      title,
-      description,
-    }: {
-      apiCall: () => Promise<unknown>
-      parseResult: (result: unknown) => unknown
-      title: string
-      description: string
-    }) => {
-      if (pendingKeyExportRef.current) {
-        pendingKeyExportRef.current.reject(
-          new Error(t('Another secure verification is already running'))
-        )
-        pendingKeyExportRef.current = null
-      }
-
-      return new Promise<unknown>((resolve, reject) => {
-        pendingKeyExportRef.current = { resolve, reject, parseResult }
-        startVerification(apiCall, {
-          preferredMethod: 'passkey',
-          title,
-          description,
-        })
-          .then((started) => {
-            if (!started && pendingKeyExportRef.current) {
-              pendingKeyExportRef.current = null
-              reject(new Error(t('Secure verification was not started')))
-            }
-          })
-          .catch((error) => {
-            if (pendingKeyExportRef.current) {
-              pendingKeyExportRef.current = null
-            }
-            reject(error)
-          })
-      })
-    },
-    [startVerification, t]
-  )
 
   const triggerRefresh = useCallback(() => {
     setRefreshTrigger((prev) => prev + 1)
@@ -171,22 +80,7 @@ export function ApiKeysProvider({ children }: { children: React.ReactNode }) {
       const request = (async () => {
         setLoadingKeys((prev) => ({ ...prev, [id]: true }))
         try {
-          let res
-          try {
-            res = await fetchTokenKey(id)
-          } catch (error) {
-            if (!isVerificationRequiredError(error)) {
-              throw error
-            }
-            res = (await requestKeyExportVerification({
-              apiCall: () => fetchTokenKey(id),
-              parseResult: (result) => result,
-              title: t('Verify to reveal API key'),
-              description: t(
-                'Confirm your identity before viewing, copying, or exporting this API key.'
-              ),
-            })) as Awaited<ReturnType<typeof fetchTokenKey>>
-          }
+          const res = await fetchTokenKey(id)
 
           if (res.success && res.data?.key) {
             const fullKey = `sk-${res.data.key}`
@@ -213,7 +107,7 @@ export function ApiKeysProvider({ children }: { children: React.ReactNode }) {
       pendingRequests.current[id] = request
       return request
     },
-    [resolvedKeys, requestKeyExportVerification, t]
+    [resolvedKeys, t]
   )
 
   const resolveRealKeysBatch = useCallback(
@@ -230,22 +124,7 @@ export function ApiKeysProvider({ children }: { children: React.ReactNode }) {
       }
 
       try {
-        let res
-        try {
-          res = await fetchTokenKeysBatch(uncachedIds)
-        } catch (error) {
-          if (!isVerificationRequiredError(error)) {
-            throw error
-          }
-          res = (await requestKeyExportVerification({
-            apiCall: () => fetchTokenKeysBatch(uncachedIds),
-            parseResult: (result) => result,
-            title: t('Verify to export API keys'),
-            description: t(
-              'Confirm your identity before batch copying or exporting API keys.'
-            ),
-          })) as Awaited<ReturnType<typeof fetchTokenKeysBatch>>
-        }
+        const res = await fetchTokenKeysBatch(uncachedIds)
 
         if (res.success && res.data?.keys) {
           const newKeys: Record<number, string> = {}
@@ -277,7 +156,7 @@ export function ApiKeysProvider({ children }: { children: React.ReactNode }) {
         }
       }
     },
-    [resolvedKeys, requestKeyExportVerification, t]
+    [resolvedKeys, t]
   )
 
   return (
@@ -300,20 +179,6 @@ export function ApiKeysProvider({ children }: { children: React.ReactNode }) {
       }}
     >
       {children}
-      <SecureVerificationDialog
-        open={verificationOpen}
-        onOpenChange={(nextOpen) => {
-          if (!nextOpen) cancelVerification()
-        }}
-        methods={verificationMethods}
-        state={verificationState}
-        onVerify={async (method, code) => {
-          await executeVerification(method, code)
-        }}
-        onCancel={cancelVerification}
-        onCodeChange={setVerificationCode}
-        onMethodChange={switchVerificationMethod}
-      />
     </ApiKeysContext>
   )
 }
