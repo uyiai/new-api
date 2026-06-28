@@ -86,6 +86,16 @@ LOG_SQL_DSN="${LOG_SQL_DSN:-}"
 SESSION_SECRET="${SESSION_SECRET:-}"
 CRYPTO_SECRET="${CRYPTO_SECRET:-}"
 NODE_NAME="${NODE_NAME:-${PROJECT_NAME}-node-1}"
+
+# DB connection pool (per app node). Keep SQL_MAX_OPEN_CONNS BELOW the database
+# server's max_connections, leaving headroom for admin/other clients. A pool
+# this size serves very high HTTP concurrency because each request only holds a
+# connection for the few ms it queries (most relay time is spent on the upstream
+# LLM, plus Redis/in-memory cache and batched writes keep DB load low).
+SQL_MAX_OPEN_CONNS="${SQL_MAX_OPEN_CONNS:-100}"
+SQL_MAX_IDLE_CONNS="${SQL_MAX_IDLE_CONNS:-20}"
+SQL_MAX_LIFETIME="${SQL_MAX_LIFETIME:-60}"
+
 BUILD_ON_UP="${BUILD_ON_UP:-1}"
 FRONTEND_BUILD_GC_HEAP_SIZE="${FRONTEND_BUILD_GC_HEAP_SIZE:-536870912}"
 if [[ -z "${FRONTEND_THEME+x}" ]]; then
@@ -351,6 +361,9 @@ run_container() {
     -e "MEMORY_CACHE_ENABLED=${MEMORY_CACHE_ENABLED:-true}"
     -e "SYNC_FREQUENCY=${SYNC_FREQUENCY:-60}"
     -e "NODE_NAME=${NODE_NAME}"
+    -e "SQL_MAX_OPEN_CONNS=${SQL_MAX_OPEN_CONNS}"
+    -e "SQL_MAX_IDLE_CONNS=${SQL_MAX_IDLE_CONNS}"
+    -e "SQL_MAX_LIFETIME=${SQL_MAX_LIFETIME}"
   )
   if [[ -n "${LOG_SQL_DSN}" ]]; then
     env_args+=(-e "LOG_SQL_DSN=${LOG_SQL_DSN}")
