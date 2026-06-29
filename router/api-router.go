@@ -277,6 +277,8 @@ func SetApiRouter(router *gin.Engine) {
 			channelRoute.POST("/preparations", controller.AddChannelPreparation)
 			channelRoute.POST("/preparations/import", controller.ImportChannelPreparations)
 			channelRoute.POST("/preparations/batch/promote", controller.PromoteChannelPreparationsBatch)
+			channelRoute.GET("/preparations/auto-promotion/setting", controller.GetChannelPreparationAutoPromotionSetting)
+			channelRoute.PUT("/preparations/auto-promotion/setting", controller.UpdateChannelPreparationAutoPromotionSetting)
 			channelRoute.GET("/preparations/auto-promotion/status", controller.GetChannelPreparationAutoPromotionSchedulerStatus)
 			channelRoute.POST("/preparations/auto-promotion/run", controller.RunChannelPreparationAutoPromotionManually)
 			channelRoute.GET("/preparations/:id/test", controller.TestChannelPreparation)

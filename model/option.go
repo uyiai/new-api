@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -277,6 +278,13 @@ func UpdateOption(key string, value string) error {
 // is touched — safe for callers that must commit a set of related options
 // atomically (e.g. payment gateway binding).
 func UpdateOptionsBulk(values map[string]string) error {
+	return UpdateOptionsBulkOrdered(values, nil)
+}
+
+// UpdateOptionsBulkOrdered is UpdateOptionsBulk with deterministic in-memory
+// update order. Database writes are still committed transactionally first; after
+// commit, updateOrder controls how related runtime settings become visible.
+func UpdateOptionsBulkOrdered(values map[string]string, updateOrder []string) error {
 	if len(values) == 0 {
 		return nil
 	}
@@ -296,8 +304,28 @@ func UpdateOptionsBulk(values map[string]string) error {
 	if err != nil {
 		return err
 	}
-	for k, v := range values {
-		if err := updateOptionMap(k, v); err != nil {
+
+	orderedKeys := make([]string, 0, len(values))
+	seen := make(map[string]bool, len(values))
+	for _, key := range updateOrder {
+		if _, ok := values[key]; !ok || seen[key] {
+			continue
+		}
+		orderedKeys = append(orderedKeys, key)
+		seen[key] = true
+	}
+	remainingKeys := make([]string, 0, len(values)-len(orderedKeys))
+	for key := range values {
+		if seen[key] {
+			continue
+		}
+		remainingKeys = append(remainingKeys, key)
+	}
+	sort.Strings(remainingKeys)
+	orderedKeys = append(orderedKeys, remainingKeys...)
+
+	for _, key := range orderedKeys {
+		if err := updateOptionMap(key, values[key]); err != nil {
 			return err
 		}
 	}

@@ -1,3 +1,22 @@
+/*
+Copyright (C) 2025 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Banner,
@@ -21,7 +40,6 @@ import {
 } from '../../../helpers';
 import { CHANNEL_OPTIONS } from '../../../constants/channel.constants';
 
-const SETTING_PREFIX = 'channel_preparation_auto_promotion_setting.';
 const DEFAULT_STRATEGY = 'priority_weighted';
 const DEFAULT_GUARANTEE_PRIORITY = 'capacity_first';
 const DEFAULT_GROUP = 'default';
@@ -109,47 +127,32 @@ function normalizeRule(rule = {}) {
   };
 }
 
-function optionsToSettings(options = []) {
-  const map = {};
-  options.forEach((item) => {
-    map[item.key] = item.value;
-  });
-
-  let rules = [];
-  try {
-    rules = JSON.parse(map[`${SETTING_PREFIX}rules`] || '[]');
-    if (!Array.isArray(rules)) rules = [];
-  } catch (error) {
-    rules = [];
-  }
-
+function normalizeSettings(setting = {}) {
+  const rules = Array.isArray(setting.rules) ? setting.rules : [];
   return {
     scheduler_enabled: parseBool(
-      map[`${SETTING_PREFIX}scheduler_enabled`],
+      setting.scheduler_enabled,
       DEFAULT_SETTINGS.scheduler_enabled,
     ),
     interval_minutes: parseNumber(
-      map[`${SETTING_PREFIX}interval_minutes`],
+      setting.interval_minutes,
       DEFAULT_SETTINGS.interval_minutes,
     ),
     max_promotions_per_run: parseNumber(
-      map[`${SETTING_PREFIX}max_promotions_per_run`],
+      setting.max_promotions_per_run,
       DEFAULT_SETTINGS.max_promotions_per_run,
     ),
     rules: rules.map(normalizeRule),
   };
 }
 
-function buildOptionUpdates(settings) {
-  return [
-    ['scheduler_enabled', String(!!settings.scheduler_enabled)],
-    ['interval_minutes', String(settings.interval_minutes || 10)],
-    ['max_promotions_per_run', String(settings.max_promotions_per_run || 10)],
-    ['rules', JSON.stringify((settings.rules || []).map(normalizeRule))],
-  ].map(([key, value]) => ({
-    key: `${SETTING_PREFIX}${key}`,
-    value,
-  }));
+function buildSettingsPayload(settings) {
+  return {
+    scheduler_enabled: !!settings.scheduler_enabled,
+    interval_minutes: Number(settings.interval_minutes || 10),
+    max_promotions_per_run: Number(settings.max_promotions_per_run || 10),
+    rules: (settings.rules || []).map(normalizeRule),
+  };
 }
 
 function formatUSD(value) {
@@ -309,11 +312,14 @@ const AutoPromotionPanel = ({ t, refreshPreparations }) => {
   const loadSettings = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await API.get('/api/option/', { skipErrorHandler: true });
+      const res = await API.get(
+        '/api/channel/preparations/auto-promotion/setting',
+        { skipErrorHandler: true },
+      );
       if (!res.data.success) {
         throw new Error(res.data.message || t('加载自动晋升配置失败'));
       }
-      setSettings(optionsToSettings(res.data.data || []));
+      setSettings(normalizeSettings(res.data.data || {}));
       setCanConfigure(true);
     } catch (error) {
       setCanConfigure(false);
@@ -340,20 +346,12 @@ const AutoPromotionPanel = ({ t, refreshPreparations }) => {
     if (!validateSettings()) return;
     setSaving(true);
     try {
-      const updates = buildOptionUpdates(settings);
-      const orderedUpdates = [
-        ...updates.filter(
-          (item) => item.key !== `${SETTING_PREFIX}scheduler_enabled`,
-        ),
-        ...updates.filter(
-          (item) => item.key === `${SETTING_PREFIX}scheduler_enabled`,
-        ),
-      ];
-      for (const item of orderedUpdates) {
-        const res = await API.put('/api/option/', item);
-        if (!res.data.success) {
-          throw new Error(res.data.message || t('保存自动晋升配置失败'));
-        }
+      const res = await API.put(
+        '/api/channel/preparations/auto-promotion/setting',
+        buildSettingsPayload(settings),
+      );
+      if (!res.data.success) {
+        throw new Error(res.data.message || t('保存自动晋升配置失败'));
       }
       showSuccess(t('自动晋升配置已保存'));
       await reloadAll();
@@ -491,7 +489,7 @@ const AutoPromotionPanel = ({ t, refreshPreparations }) => {
           fullMode={false}
           type='info'
           description={t(
-            '自动晋升配置需要 root 权限。普通管理员仍可按已保存规则手动执行自动晋升检查。',
+            '自动晋升配置加载失败。可先按已保存规则手动执行自动晋升检查。',
           )}
           className='mb-3'
         />

@@ -6,6 +6,7 @@ import (
 	"math"
 	"math/rand"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -148,6 +149,71 @@ func getChannelPreparationAutoPromotionSchedulerStatus() channelPreparationAutoP
 
 func GetChannelPreparationAutoPromotionSchedulerStatus(c *gin.Context) {
 	common.ApiSuccess(c, getChannelPreparationAutoPromotionSchedulerStatus())
+}
+
+func GetChannelPreparationAutoPromotionSetting(c *gin.Context) {
+	setting := *operation_setting.GetChannelPreparationAutoPromotionSetting()
+	if setting.Rules == nil {
+		setting.Rules = []operation_setting.ChannelPreparationAutoPromotionRule{}
+	}
+	common.ApiSuccess(c, setting)
+}
+
+func UpdateChannelPreparationAutoPromotionSetting(c *gin.Context) {
+	var request operation_setting.ChannelPreparationAutoPromotionSetting
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+		common.ApiErrorMsg(c, "请求参数解析失败: "+err.Error())
+		return
+	}
+	if request.IntervalMinutes <= 0 {
+		common.ApiErrorMsg(c, "自动晋升检查间隔必须大于 0")
+		return
+	}
+	if request.MaxPromotionsPerRun <= 0 {
+		common.ApiErrorMsg(c, "自动晋升每次最大数量必须大于 0")
+		return
+	}
+	if request.Rules == nil {
+		request.Rules = []operation_setting.ChannelPreparationAutoPromotionRule{}
+	}
+	if err := operation_setting.ValidateChannelPreparationAutoPromotionRules(request.Rules); err != nil {
+		common.ApiErrorMsg(c, "自动晋升规则配置错误: "+err.Error())
+		return
+	}
+	operation_setting.NormalizeChannelPreparationAutoPromotionSetting(&request)
+
+	rulesJSON, err := common.Marshal(request.Rules)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	const (
+		schedulerEnabledKey    = "channel_preparation_auto_promotion_setting.scheduler_enabled"
+		intervalMinutesKey     = "channel_preparation_auto_promotion_setting.interval_minutes"
+		maxPromotionsPerRunKey = "channel_preparation_auto_promotion_setting.max_promotions_per_run"
+		rulesKey               = "channel_preparation_auto_promotion_setting.rules"
+	)
+	values := map[string]string{
+		schedulerEnabledKey:    strconv.FormatBool(request.SchedulerEnabled),
+		intervalMinutesKey:     strconv.FormatFloat(request.IntervalMinutes, 'f', -1, 64),
+		maxPromotionsPerRunKey: strconv.Itoa(request.MaxPromotionsPerRun),
+		rulesKey:               string(rulesJSON),
+	}
+	if err := model.UpdateOptionsBulkOrdered(values, []string{
+		intervalMinutesKey,
+		maxPromotionsPerRunKey,
+		rulesKey,
+		schedulerEnabledKey,
+	}); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	model.RecordLog(c.GetInt("id"), model.LogTypeManage, "更新渠道备货池自动晋升配置")
+	savedSetting := *operation_setting.GetChannelPreparationAutoPromotionSetting()
+	if savedSetting.Rules == nil {
+		savedSetting.Rules = []operation_setting.ChannelPreparationAutoPromotionRule{}
+	}
+	common.ApiSuccess(c, savedSetting)
 }
 
 func normalizeAutoPromotionDeficit(threshold float64, capacity float64) float64 {
