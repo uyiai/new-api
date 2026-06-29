@@ -4,10 +4,13 @@
 // Naming format: {timestamp}-{balance}-{suffix}-{keyFragment}
 //   e.g. 202606261104-500-qq-0KVSA
 //
-// The key fragment is the first 5 characters of the 4th '-' separated segment
-// of the key. For a standard Anthropic key:
-//   sk-ant-api03-0KVSAcnC9-...
-// segment[3] = "0KVSAcnC9" => fragment = "0KVSA".
+// The key fragment is the first 5 characters of the key's random portion, i.e.
+// everything after the fixed `sk-ant-api03-` prefix (the first 3 '-' segments).
+// The random portion may itself contain '-', so we DO NOT truncate at the first
+// '-' — the 5 characters are taken verbatim, dashes included.
+//
+//   sk-ant-api03-0KVSAcnC9-...        => "0KVSA"
+//   sk-ant-api03-X-FFemHhdVEMbMuf...  => "X-FFe"
 
 // Fixed length of the key fragment.
 export const KEY_FRAGMENT_LENGTH = 5;
@@ -18,7 +21,12 @@ const KEY_FRAGMENT_SEGMENT_INDEX = 3;
 /**
  * Extract the naming fragment from a channel key.
  *
- * Returns '' when the key has fewer than 4 segments, or the 4th segment has
+ * Takes the random portion of the key (everything after the first
+ * KEY_FRAGMENT_SEGMENT_INDEX '-' segments, i.e. after `sk-ant-api03-`) and
+ * returns its first KEY_FRAGMENT_LENGTH characters verbatim — including any '-'
+ * the random portion contains (e.g. "X-FFe" for sk-ant-api03-X-FFem...).
+ *
+ * Returns '' when the key has fewer than 4 segments, or the random portion has
  * fewer than KEY_FRAGMENT_LENGTH characters, so callers can fall back to the
  * original three-segment name without a trailing separator.
  *
@@ -30,9 +38,12 @@ export const extractKeyFragment = (key) => {
     .trim()
     .split('-');
   if (segments.length <= KEY_FRAGMENT_SEGMENT_INDEX) return '';
-  const segment = (segments[KEY_FRAGMENT_SEGMENT_INDEX] || '').trim();
-  if (segment.length < KEY_FRAGMENT_LENGTH) return '';
-  return segment.slice(0, KEY_FRAGMENT_LENGTH);
+  // The random portion may itself contain '-' (e.g. sk-ant-api03-X-FFem...),
+  // so rejoin from the 4th segment and slice verbatim instead of truncating at
+  // the first '-'.
+  const remainder = segments.slice(KEY_FRAGMENT_SEGMENT_INDEX).join('-');
+  if (remainder.length < KEY_FRAGMENT_LENGTH) return '';
+  return remainder.slice(0, KEY_FRAGMENT_LENGTH);
 };
 
 /**
