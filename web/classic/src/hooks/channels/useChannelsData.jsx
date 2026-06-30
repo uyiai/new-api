@@ -80,6 +80,8 @@ export const useChannelsData = () => {
   const [autoRefreshSeconds, setAutoRefreshSecondsState] = useState(() =>
     normalizeAutoRefreshSeconds(localStorage.getItem(AUTO_REFRESH_SECONDS_KEY)),
   );
+  const [autoRefreshCountdown, setAutoRefreshCountdown] =
+    useState(autoRefreshSeconds);
 
   // UI states
   const [showEdit, setShowEdit] = useState(false);
@@ -162,11 +164,13 @@ export const useChannelsData = () => {
     const nextEnabled = Boolean(enabled);
     setAutoRefreshEnabledState(nextEnabled);
     localStorage.setItem(AUTO_REFRESH_ENABLED_KEY, String(nextEnabled));
+    setAutoRefreshCountdown(autoRefreshSeconds);
   };
 
   const setAutoRefreshSeconds = (value) => {
     const nextSeconds = normalizeAutoRefreshSeconds(value);
     setAutoRefreshSecondsState(nextSeconds);
+    setAutoRefreshCountdown(nextSeconds);
     localStorage.setItem(AUTO_REFRESH_SECONDS_KEY, String(nextSeconds));
   };
 
@@ -486,12 +490,16 @@ export const useChannelsData = () => {
 
   useEffect(() => {
     if (!autoRefreshEnabled) {
+      setAutoRefreshCountdown(autoRefreshSeconds);
       return undefined;
     }
 
-    const timer = setInterval(() => {
+    let remainingSeconds = autoRefreshSeconds;
+    setAutoRefreshCountdown(remainingSeconds);
+
+    const triggerAutoRefresh = () => {
       if (autoRefreshInFlightRef.current) {
-        return;
+        return false;
       }
       autoRefreshInFlightRef.current = true;
       executeChannelsQuery({
@@ -506,7 +514,20 @@ export const useChannelsData = () => {
         .finally(() => {
           autoRefreshInFlightRef.current = false;
         });
-    }, autoRefreshSeconds * 1000);
+      return true;
+    };
+
+    const timer = setInterval(() => {
+      remainingSeconds -= 1;
+      if (remainingSeconds <= 0) {
+        if (triggerAutoRefresh()) {
+          remainingSeconds = autoRefreshSeconds;
+        } else {
+          remainingSeconds = 1;
+        }
+      }
+      setAutoRefreshCountdown(remainingSeconds);
+    }, 1000);
 
     return () => clearInterval(timer);
     // executeChannelsQuery intentionally stays inline; dependencies below capture current filters/page/form values.
@@ -1267,6 +1288,7 @@ export const useChannelsData = () => {
     channelStats,
     autoRefreshEnabled,
     autoRefreshSeconds,
+    autoRefreshCountdown,
     setAutoRefreshEnabled,
     setAutoRefreshSeconds,
     groupOptions,

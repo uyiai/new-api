@@ -18,8 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useMemo } from 'react';
-import { Button, Form, InputNumber } from '@douyinfe/semi-ui';
-import { IconSearch, IconUpload } from '@douyinfe/semi-icons';
+import { Button, Form, InputNumber, Tooltip } from '@douyinfe/semi-ui';
+import { IconRefresh, IconSearch, IconUpload } from '@douyinfe/semi-icons';
 import { renderQuotaWithAmount } from '../../../helpers';
 
 const ChannelsFilters = ({
@@ -38,6 +38,7 @@ const ChannelsFilters = ({
   searching,
   autoRefreshEnabled,
   autoRefreshSeconds,
+  autoRefreshCountdown,
   setAutoRefreshEnabled,
   setAutoRefreshSeconds,
   setShowBatchImport,
@@ -111,19 +112,26 @@ const ChannelsFilters = ({
             max={300}
             step={1}
             value={autoRefreshSeconds}
-            suffix={t('秒')}
             onChange={(value) => setAutoRefreshSeconds(value ?? 5)}
-            style={{ width: 92 }}
+            style={{ width: 58 }}
           />
-          <Button
-            size='small'
-            type={autoRefreshEnabled ? 'warning' : 'tertiary'}
-            theme={autoRefreshEnabled ? 'solid' : 'light'}
-            onClick={() => setAutoRefreshEnabled(!autoRefreshEnabled)}
-            className='w-full md:w-auto'
+          <Tooltip
+            content={
+              autoRefreshEnabled ? t('点击停止定时刷新') : t('点击开启定时刷新')
+            }
           >
-            {autoRefreshEnabled ? t('停止刷新') : t('定时刷新')}
-          </Button>
+            <Button
+              size='small'
+              type={autoRefreshEnabled ? 'warning' : 'tertiary'}
+              theme={autoRefreshEnabled ? 'solid' : 'light'}
+              icon={<IconRefresh />}
+              onClick={() => setAutoRefreshEnabled(!autoRefreshEnabled)}
+            >
+              {autoRefreshEnabled
+                ? `${autoRefreshCountdown || autoRefreshSeconds}${t('秒')}`
+                : null}
+            </Button>
+          </Tooltip>
         </div>
       </div>
 
