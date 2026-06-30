@@ -85,6 +85,7 @@ type queryKeyReportItemAccumulator struct {
 	usedAmount              float64
 	originalAmount          float64
 	overBrushAmount         float64
+	matchedRecordCount      int
 	originalAmountShared    bool
 	usesSharedMatchedUsage  bool
 	sharedMatchedUsedAmount float64
@@ -182,8 +183,9 @@ func applyQueryKeyReportRecord(accumulators map[string]*queryKeyReportItemAccumu
 		acc.usedQuota += record.usedQuota
 		acc.usedAmount += usedAmount
 		acc.originalAmount = maxFloat(acc.originalAmount, originalAmount)
+		acc.matchedRecordCount++
 		acc.channels = append(acc.channels, detail)
-		if isMultiKeyChannel {
+		if isMultiKeyChannel || acc.matchedRecordCount > 1 {
 			acc.originalAmountShared = true
 		}
 		if sharedOriginal {

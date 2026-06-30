@@ -100,7 +100,7 @@ func TestBuildChannelQueryKeyReportAggregatesDuplicateRowsAndSharedMultiKeyBalan
 	require.InDelta(t, 6, repeat.OriginalAmount, 0.000001)
 	require.InDelta(t, -1, repeat.CurrentAmount, 0.000001)
 	require.InDelta(t, 1, repeat.OverBrushAmount, 0.000001)
-	require.False(t, repeat.OriginalAmountShared)
+	require.True(t, repeat.OriginalAmountShared)
 
 	missing := reportItemByKey(t, report, "sk-missing")
 	require.False(t, missing.Found)
@@ -125,6 +125,39 @@ func TestBuildChannelQueryKeyReportAggregatesDuplicateRowsAndSharedMultiKeyBalan
 	sharedB := reportItemByKey(t, report, "sk-shared-b")
 	require.True(t, sharedB.OriginalAmountShared)
 	require.InDelta(t, 10, sharedB.OriginalAmount, 0.000001)
+}
+
+func TestBuildChannelQueryKeyReportTreatsSameKeyAcrossGroupsAsSharedBalance(t *testing.T) {
+	setupQueryKeyReportModelTestDB(t)
+
+	channels := []Channel{
+		{Id: 30, Type: 14, Key: "sk-shared-group", Name: "shared default", Status: common.ChannelStatusEnabled, Group: "default", Models: "claude-3", UsedQuota: quotaUnits(10), Balance: 100},
+		{Id: 31, Type: 14, Key: "sk-shared-group", Name: "shared vip", Status: common.ChannelStatusEnabled, Group: "vip", Models: "claude-3", UsedQuota: quotaUnits(20), Balance: 100},
+		{Id: 32, Type: 14, Key: "sk-shared-group", Name: "shared svip", Status: common.ChannelStatusEnabled, Group: "svip", Models: "claude-3", UsedQuota: quotaUnits(5), Balance: 95},
+	}
+	require.NoError(t, DB.Create(&channels).Error)
+	require.NoError(t, DB.Create(&ChannelPreparation{Id: 33, Type: 14, Key: "sk-shared-group", Name: "shared prep", Status: ChannelPreparationStatusPending, Group: "vip", Models: "claude-3", Balance: 100}).Error)
+
+	report, err := BuildChannelQueryKeyReport([]string{"sk-shared-group"})
+	require.NoError(t, err)
+
+	require.Equal(t, 1, report.FoundCount)
+	require.Equal(t, int64(quotaUnits(35)), report.TotalUsedQuota)
+	require.InDelta(t, 35, report.TotalUsedAmount, 0.000001)
+	require.InDelta(t, 100, report.TotalOriginalAmount, 0.000001)
+	require.InDelta(t, 65, report.TotalCurrentAmount, 0.000001)
+	require.InDelta(t, 0, report.TotalOverBrushAmount, 0.000001)
+
+	item := reportItemByKey(t, report, "sk-shared-group")
+	require.True(t, item.Found)
+	require.Equal(t, QueryKeyReportStatusFound, item.Status)
+	require.Equal(t, 4, item.ChannelCount)
+	require.True(t, item.OriginalAmountShared)
+	require.Equal(t, int64(quotaUnits(35)), item.UsedQuota)
+	require.InDelta(t, 35, item.UsedAmount, 0.000001)
+	require.InDelta(t, 100, item.OriginalAmount, 0.000001)
+	require.InDelta(t, 65, item.CurrentAmount, 0.000001)
+	require.InDelta(t, 0, item.OverBrushAmount, 0.000001)
 }
 
 func TestBuildChannelQueryKeyReportIncludesChannelPreparations(t *testing.T) {
