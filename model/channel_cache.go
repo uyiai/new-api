@@ -143,12 +143,10 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 	targetPriority := int64(sortedUniquePriorities[retry])
 
 	// get the priority for the given retry number
-	var sumWeight = 0
 	var targetChannels []*Channel
 	for _, channelId := range channels {
 		if channel, ok := channelsIDM[channelId]; ok {
 			if channel.GetPriority() == targetPriority {
-				sumWeight += channel.GetWeight()
 				targetChannels = append(targetChannels, channel)
 			}
 		} else {
@@ -158,6 +156,26 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 
 	if len(targetChannels) == 0 {
 		return nil, errors.New(fmt.Sprintf("no channel found, group: %s, model: %s, priority: %d", group, model, targetPriority))
+	}
+
+	// Skip channels currently cooling down after upstream rate limiting, so load
+	// shifts to idle channels. If every channel in this tier is cooling down,
+	// fall back to the full set rather than failing the request.
+	if common.ChannelCooldownEnabled {
+		available := targetChannels[:0:0]
+		for _, channel := range targetChannels {
+			if !IsChannelCoolingDown(channel.Id) {
+				available = append(available, channel)
+			}
+		}
+		if len(available) > 0 {
+			targetChannels = available
+		}
+	}
+
+	var sumWeight = 0
+	for _, channel := range targetChannels {
+		sumWeight += channel.GetWeight()
 	}
 
 	// smoothing factor and adjustment

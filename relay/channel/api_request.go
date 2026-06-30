@@ -13,6 +13,7 @@ import (
 
 	common2 "github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -522,6 +523,12 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	if resp == nil {
 		return nil, errors.New("resp is nil")
 	}
+
+	// Pace channel selection off the upstream's own rate-limit signals: rest a
+	// rate-limited (429) or nearly-exhausted channel until its exact reset, so
+	// traffic shifts to idle channels. Credit is untouched, so total extraction
+	// is unaffected.
+	model.ApplyUpstreamRateLimitHeaders(info.ChannelId, resp.StatusCode, resp.Header)
 
 	if upID := resp.Header.Get(common2.RequestIdKey); upID != "" {
 		c.Set(common2.UpstreamRequestIdKey, upID)
