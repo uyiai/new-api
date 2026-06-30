@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useMemo } from 'react';
-import { Button, Form } from '@douyinfe/semi-ui';
+import { Button, Form, InputNumber } from '@douyinfe/semi-ui';
 import { IconSearch, IconUpload } from '@douyinfe/semi-icons';
 import { renderQuotaWithAmount } from '../../../helpers';
 
@@ -36,6 +36,10 @@ const ChannelsFilters = ({
   channelStats,
   loading,
   searching,
+  autoRefreshEnabled,
+  autoRefreshSeconds,
+  setAutoRefreshEnabled,
+  setAutoRefreshSeconds,
   setShowBatchImport,
   t,
 }) => {
@@ -50,10 +54,7 @@ const ChannelsFilters = ({
       totalAmount: renderQuotaWithAmount(totalAmount),
       remainingAmount: renderQuotaWithAmount(remainingAmount),
     };
-  }, [
-    channelStats?.used_quota_balance_nonzero,
-    channelStats?.balance_total,
-  ]);
+  }, [channelStats?.used_quota_balance_nonzero, channelStats?.balance_total]);
 
   return (
     <div className='flex flex-col md:flex-row justify-between items-center gap-2 w-full'>
@@ -102,6 +103,28 @@ const ChannelsFilters = ({
         >
           {t('列设置')}
         </Button>
+
+        <div className='flex items-center gap-1 w-full md:w-auto'>
+          <InputNumber
+            size='small'
+            min={1}
+            max={300}
+            step={1}
+            value={autoRefreshSeconds}
+            suffix={t('秒')}
+            onChange={(value) => setAutoRefreshSeconds(value ?? 5)}
+            style={{ width: 92 }}
+          />
+          <Button
+            size='small'
+            type={autoRefreshEnabled ? 'warning' : 'tertiary'}
+            theme={autoRefreshEnabled ? 'solid' : 'light'}
+            onClick={() => setAutoRefreshEnabled(!autoRefreshEnabled)}
+            className='w-full md:w-auto'
+          >
+            {autoRefreshEnabled ? t('停止刷新') : t('定时刷新')}
+          </Button>
+        </div>
       </div>
 
       <div className='flex flex-col md:flex-row items-center gap-2 w-full md:w-auto order-1 md:order-2'>

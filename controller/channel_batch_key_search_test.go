@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -35,6 +36,21 @@ func postChannelKeySearch(t *testing.T, request BatchChannelKeySearchRequest) ch
 	ctx.Request.Header.Set("Content-Type", "application/json")
 
 	SearchChannelsByKeys(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var payload channelKeySearchTestResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &payload))
+	return payload
+}
+
+func getChannelSearch(t *testing.T, target string) channelKeySearchTestResponse {
+	t.Helper()
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, target, nil)
+
+	SearchChannels(ctx)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	var payload channelKeySearchTestResponse
@@ -81,6 +97,52 @@ func TestSearchChannelsByKeysExactFiltersCountsPaginationAndNoKeyLeak(t *testing
 	require.Equal(t, 1, payload.Data.Items[0].Id)
 	require.Empty(t, payload.Data.Items[0].Key)
 	require.Equal(t, map[int64]int64{1: 1, 2: 1}, payload.Data.TypeCounts)
+}
+
+func TestSearchChannelsByKeysAttachesUpstreamRateLimitStatusAndNoKeyLeak(t *testing.T) {
+	setupModelListControllerTestDB(t)
+
+	channel := model.Channel{Id: 88, Type: constant.ChannelTypeAnthropic, Key: "sk-claude-shared", Name: "claude shared", Status: common.ChannelStatusEnabled, Group: "default", Models: "claude-sonnet-4-6"}
+	require.NoError(t, model.DB.Create(&channel).Error)
+
+	header := http.Header{}
+	header.Set("Anthropic-Ratelimit-Requests-Limit", "50")
+	header.Set("Anthropic-Ratelimit-Requests-Remaining", "11")
+	model.UpdateChannelUpstreamRateLimitStatus(channel.Id, channel.Type, channel.GetBaseURL(), channel.Key, http.StatusOK, header)
+
+	payload := postChannelKeySearch(t, BatchChannelKeySearchRequest{
+		Keys:     []string{"sk-claude-shared"},
+		Page:     1,
+		PageSize: 20,
+	})
+
+	require.True(t, payload.Success)
+	require.Len(t, payload.Data.Items, 1)
+	require.Empty(t, payload.Data.Items[0].Key)
+	require.NotNil(t, payload.Data.Items[0].UpstreamRateLimitStatus)
+	require.NotNil(t, payload.Data.Items[0].UpstreamRateLimitStatus.RequestsRemaining)
+	require.Equal(t, 11, *payload.Data.Items[0].UpstreamRateLimitStatus.RequestsRemaining)
+}
+
+func TestSearchChannelsAttachesUpstreamRateLimitStatusAndNoKeyLeak(t *testing.T) {
+	setupModelListControllerTestDB(t)
+
+	channel := model.Channel{Id: 89, Type: constant.ChannelTypeAnthropic, Key: "sk-claude-search", Name: "claude searchable", Status: common.ChannelStatusEnabled, Group: "default", Models: "claude-sonnet-4-6"}
+	require.NoError(t, model.DB.Create(&channel).Error)
+
+	header := http.Header{}
+	header.Set("Anthropic-Ratelimit-Requests-Limit", "50")
+	header.Set("Anthropic-Ratelimit-Requests-Remaining", "10")
+	model.UpdateChannelUpstreamRateLimitStatus(channel.Id, channel.Type, channel.GetBaseURL(), channel.Key, http.StatusOK, header)
+
+	payload := getChannelSearch(t, "/api/channel/search?keyword=claude%20searchable&p=1&page_size=20")
+
+	require.True(t, payload.Success)
+	require.Len(t, payload.Data.Items, 1)
+	require.Empty(t, payload.Data.Items[0].Key)
+	require.NotNil(t, payload.Data.Items[0].UpstreamRateLimitStatus)
+	require.NotNil(t, payload.Data.Items[0].UpstreamRateLimitStatus.RequestsRemaining)
+	require.Equal(t, 10, *payload.Data.Items[0].UpstreamRateLimitStatus.RequestsRemaining)
 }
 
 func TestSearchChannelsByKeysComposesDisabledStatus(t *testing.T) {

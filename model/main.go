@@ -257,6 +257,7 @@ func migrateDB() error {
 
 	err := DB.AutoMigrate(
 		&Channel{},
+		&ChannelUpstreamRateLimitStatus{},
 		&ChannelPreparation{},
 		&Token{},
 		&User{},
@@ -320,6 +321,7 @@ func migrateDBFast() error {
 		name  string
 	}{
 		{&Channel{}, "Channel"},
+		{&ChannelUpstreamRateLimitStatus{}, "ChannelUpstreamRateLimitStatus"},
 		{&ChannelPreparation{}, "ChannelPreparation"},
 		{&Token{}, "Token"},
 		{&User{}, "User"},

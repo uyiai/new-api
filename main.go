@@ -286,6 +286,7 @@ func InitResources() error {
 	}
 
 	model.CheckSetup()
+	model.StartChannelUpstreamRateLimitStatusFlushTask()
 
 	// Initialize options, should after model.InitDB()
 	model.InitOptionMap()

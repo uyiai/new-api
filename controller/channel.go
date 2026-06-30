@@ -62,6 +62,7 @@ func parseStatusFilter(statusParam string) int {
 }
 
 func clearChannelInfo(channel *model.Channel) {
+	channel.Key = ""
 	if channel.ChannelInfo.IsMultiKey {
 		channel.ChannelInfo.MultiKeyDisabledReason = nil
 		channel.ChannelInfo.MultiKeyDisabledTime = nil
@@ -128,7 +129,6 @@ func GetAllChannels(c *gin.Context) {
 			}
 			var tagChannels []*model.Channel
 			err := sortOptions.Apply(buildChannelListQuery(groupFilter, statusFilter, typeFilter).Where("tag = ?", *tag)).
-				Omit("key").
 				Find(&tagChannels).Error
 			if err != nil {
 				common.SysError("failed to get channels by tag: " + err.Error())
@@ -147,7 +147,6 @@ func GetAllChannels(c *gin.Context) {
 		err := sortOptions.Apply(buildChannelListQuery(groupFilter, statusFilter, typeFilter)).
 			Limit(pageInfo.GetPageSize()).
 			Offset(pageInfo.GetStartIdx()).
-			Omit("key").
 			Find(&channelData).Error
 		if err != nil {
 			common.SysError("failed to get channels: " + err.Error())
@@ -156,6 +155,9 @@ func GetAllChannels(c *gin.Context) {
 		}
 	}
 
+	if err := model.AttachChannelUpstreamRateLimitStatuses(channelData); err != nil {
+		common.SysError("failed to attach upstream rate limit statuses: " + err.Error())
+	}
 	for _, datum := range channelData {
 		clearChannelInfo(datum)
 	}
@@ -383,9 +385,11 @@ func SearchChannelsByKeys(c *gin.Context) {
 	}
 	pagedData := channelData[startIdx:endIdx]
 
+	if err := model.AttachChannelUpstreamRateLimitStatuses(pagedData); err != nil {
+		common.SysError("failed to attach upstream rate limit statuses: " + err.Error())
+	}
 	for _, datum := range pagedData {
 		clearChannelInfo(datum)
-		datum.Key = ""
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -423,7 +427,6 @@ func SearchChannels(c *gin.Context) {
 			if tag != nil && *tag != "" {
 				var tagChannels []*model.Channel
 				err := sortOptions.Apply(buildChannelListQuery(group, -1, -1).Where("tag = ?", *tag)).
-					Omit("key").
 					Find(&tagChannels).Error
 				if err != nil {
 					c.JSON(http.StatusOK, gin.H{
@@ -508,6 +511,9 @@ func SearchChannels(c *gin.Context) {
 
 	pagedData := channelData[startIdx:endIdx]
 
+	if err := model.AttachChannelUpstreamRateLimitStatuses(pagedData); err != nil {
+		common.SysError("failed to attach upstream rate limit statuses: " + err.Error())
+	}
 	for _, datum := range pagedData {
 		clearChannelInfo(datum)
 	}
@@ -531,12 +537,15 @@ func GetChannel(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	channel, err := model.GetChannelById(id, false)
+	channel, err := model.GetChannelById(id, true)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 	if channel != nil {
+		if err := model.AttachChannelUpstreamRateLimitStatuses([]*model.Channel{channel}); err != nil {
+			common.SysError("failed to attach upstream rate limit status: " + err.Error())
+		}
 		clearChannelInfo(channel)
 	}
 	c.JSON(http.StatusOK, gin.H{

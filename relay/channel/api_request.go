@@ -529,6 +529,7 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	// traffic shifts to idle channels. Credit is untouched, so total extraction
 	// is unaffected.
 	model.ApplyUpstreamRateLimitHeaders(info.ChannelId, resp.StatusCode, resp.Header)
+	model.UpdateChannelUpstreamRateLimitStatus(info.ChannelId, info.ChannelType, info.ChannelBaseUrl, info.ApiKey, resp.StatusCode, resp.Header)
 
 	if upID := resp.Header.Get(common2.RequestIdKey); upID != "" {
 		c.Set(common2.UpstreamRequestIdKey, upID)

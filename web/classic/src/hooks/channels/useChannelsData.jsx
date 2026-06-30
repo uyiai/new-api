@@ -40,6 +40,23 @@ import { parseUpstreamUpdateMeta } from './upstreamUpdateUtils';
 import { Modal, Button } from '@douyinfe/semi-ui';
 import { openCodexUsageModal } from '../../components/table/channels/modals/CodexUsageModal';
 
+const AUTO_REFRESH_ENABLED_KEY = 'channels-auto-refresh-enabled';
+const AUTO_REFRESH_SECONDS_KEY = 'channels-auto-refresh-seconds';
+const DEFAULT_AUTO_REFRESH_SECONDS = 5;
+const MIN_AUTO_REFRESH_SECONDS = 1;
+const MAX_AUTO_REFRESH_SECONDS = 300;
+
+const normalizeAutoRefreshSeconds = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_AUTO_REFRESH_SECONDS;
+  }
+  return Math.min(
+    MAX_AUTO_REFRESH_SECONDS,
+    Math.max(MIN_AUTO_REFRESH_SECONDS, Math.floor(parsed)),
+  );
+};
+
 export const useChannelsData = () => {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
@@ -57,6 +74,12 @@ export const useChannelsData = () => {
     balance_total: 0,
   });
   const [groupOptions, setGroupOptions] = useState([]);
+  const [autoRefreshEnabled, setAutoRefreshEnabledState] = useState(
+    () => localStorage.getItem(AUTO_REFRESH_ENABLED_KEY) === 'true',
+  );
+  const [autoRefreshSeconds, setAutoRefreshSecondsState] = useState(() =>
+    normalizeAutoRefreshSeconds(localStorage.getItem(AUTO_REFRESH_SECONDS_KEY)),
+  );
 
   // UI states
   const [showEdit, setShowEdit] = useState(false);
@@ -125,6 +148,7 @@ export const useChannelsData = () => {
 
   // Refs
   const requestCounter = useRef(0);
+  const autoRefreshInFlightRef = useRef(false);
   const allSelectingRef = useRef(false);
   const [formApi, setFormApi] = useState(null);
 
@@ -132,6 +156,18 @@ export const useChannelsData = () => {
     searchKeyword: '',
     searchGroup: '',
     searchModel: '',
+  };
+
+  const setAutoRefreshEnabled = (enabled) => {
+    const nextEnabled = Boolean(enabled);
+    setAutoRefreshEnabledState(nextEnabled);
+    localStorage.setItem(AUTO_REFRESH_ENABLED_KEY, String(nextEnabled));
+  };
+
+  const setAutoRefreshSeconds = (value) => {
+    const nextSeconds = normalizeAutoRefreshSeconds(value);
+    setAutoRefreshSecondsState(nextSeconds);
+    localStorage.setItem(AUTO_REFRESH_SECONDS_KEY, String(nextSeconds));
   };
 
   // Column keys
@@ -142,6 +178,7 @@ export const useChannelsData = () => {
     TYPE: 'type',
     STATUS: 'status',
     RESPONSE_TIME: 'response_time',
+    UPSTREAM_RATE_LIMIT: 'upstream_rate_limit',
     BALANCE: 'balance',
     PRIORITY: 'priority',
     WEIGHT: 'weight',
@@ -182,6 +219,7 @@ export const useChannelsData = () => {
       [COLUMN_KEYS.TYPE]: true,
       [COLUMN_KEYS.STATUS]: true,
       [COLUMN_KEYS.RESPONSE_TIME]: true,
+      [COLUMN_KEYS.UPSTREAM_RATE_LIMIT]: true,
       [COLUMN_KEYS.BALANCE]: true,
       [COLUMN_KEYS.PRIORITY]: true,
       [COLUMN_KEYS.WEIGHT]: true,
@@ -373,16 +411,10 @@ export const useChannelsData = () => {
 
       const { success, message, data } = res.data;
       if (success) {
-        const {
-          items = [],
-          total = 0,
-          stats = {},
-          type_counts = {},
-        } = data;
+        const { items = [], total = 0, stats = {}, type_counts = {} } = data;
         updateTypeCounts(type_counts);
         setChannelStats({
-          used_quota_balance_nonzero:
-            stats?.used_quota_balance_nonzero || 0,
+          used_quota_balance_nonzero: stats?.used_quota_balance_nonzero || 0,
           balance_total: stats?.balance_total || 0,
         });
         setChannelFormat(items, tagMode);
@@ -451,6 +483,45 @@ export const useChannelsData = () => {
       statusF: statusFilter,
     });
   };
+
+  useEffect(() => {
+    if (!autoRefreshEnabled) {
+      return undefined;
+    }
+
+    const timer = setInterval(() => {
+      if (autoRefreshInFlightRef.current) {
+        return;
+      }
+      autoRefreshInFlightRef.current = true;
+      executeChannelsQuery({
+        page: activePage,
+        pageSz: pageSize,
+        sortFlag: idSort,
+        tagMode: enableTagMode,
+        typeKey: activeTypeKey,
+        statusF: statusFilter,
+      })
+        .catch(() => {})
+        .finally(() => {
+          autoRefreshInFlightRef.current = false;
+        });
+    }, autoRefreshSeconds * 1000);
+
+    return () => clearInterval(timer);
+    // executeChannelsQuery intentionally stays inline; dependencies below capture current filters/page/form values.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    autoRefreshEnabled,
+    autoRefreshSeconds,
+    activePage,
+    pageSize,
+    idSort,
+    enableTagMode,
+    activeTypeKey,
+    statusFilter,
+    formApi,
+  ]);
 
   const upstreamUpdates = useChannelUpstreamUpdates({ t, refresh });
 
@@ -1194,6 +1265,10 @@ export const useChannelsData = () => {
     pageSize,
     channelCount,
     channelStats,
+    autoRefreshEnabled,
+    autoRefreshSeconds,
+    setAutoRefreshEnabled,
+    setAutoRefreshSeconds,
     groupOptions,
     idSort,
     enableTagMode,

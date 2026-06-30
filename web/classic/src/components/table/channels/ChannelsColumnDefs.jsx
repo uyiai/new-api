@@ -275,6 +275,126 @@ const isRequestPassThroughEnabled = (record) => {
   }
 };
 
+const formatRateLimitNumber = (value) => {
+  if (value === undefined || value === null) return '-';
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '-';
+  if (Math.abs(number) >= 1000000) return `${(number / 1000000).toFixed(1)}M`;
+  if (Math.abs(number) >= 1000) return `${(number / 1000).toFixed(1)}k`;
+  return String(number);
+};
+
+const formatRateLimitResetTime = (value, t) => {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number) || number <= 0) return t('无');
+  return timestamp2string(Math.floor(number / 1000));
+};
+
+const formatRateLimitObservedTime = (value, t) => {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number) || number <= 0) return t('未知');
+  return timestamp2string(Math.floor(number / 1000));
+};
+
+const renderRateLimitBucketLine = (label, remaining, limit, resetTime, t) => {
+  if (remaining === undefined && limit === undefined && !resetTime) return null;
+  return (
+    <div>
+      {label}: {formatRateLimitNumber(remaining)} / {formatRateLimitNumber(limit)}，
+      {t('重置')} {formatRateLimitResetTime(resetTime, t)}
+    </div>
+  );
+};
+
+const renderUpstreamRateLimitStatus = (record, t) => {
+  if (!record || record.children !== undefined) return '-';
+  const status = record.upstream_rate_limit_status;
+  if (!status) {
+    return (
+      <Tag color='grey' shape='circle'>
+        {t('暂无')}
+      </Tag>
+    );
+  }
+
+  const now = Date.now();
+  const cooldownUntil = Number(status.cooldown_until || 0);
+  const isCoolingDown = cooldownUntil > now;
+  const requestsRemaining = status.requests_remaining;
+  const requestsLimit = status.requests_limit;
+  const hasRequestBucket =
+    requestsRemaining !== undefined || requestsLimit !== undefined;
+  const requestText = hasRequestBucket
+    ? `${formatRateLimitNumber(requestsRemaining)}/${formatRateLimitNumber(
+        requestsLimit,
+      )}`
+    : t('已记录');
+  const tagColor = isCoolingDown
+    ? 'red'
+    : Number(status.status_code) === 429
+      ? 'red'
+      : Number(requestsRemaining) <= 1
+        ? 'yellow'
+        : 'green';
+
+  const details = (
+    <div className='space-y-1 text-xs'>
+      <div>
+        {t('状态码')}: {status.status_code || '-'}
+      </div>
+      {renderRateLimitBucketLine(
+        t('请求'),
+        status.requests_remaining,
+        status.requests_limit,
+        status.requests_reset_time,
+        t,
+      )}
+      {renderRateLimitBucketLine(
+        t('输入 Token'),
+        status.input_tokens_remaining,
+        status.input_tokens_limit,
+        status.input_tokens_reset_time,
+        t,
+      )}
+      {renderRateLimitBucketLine(
+        t('输出 Token'),
+        status.output_tokens_remaining,
+        status.output_tokens_limit,
+        status.output_tokens_reset_time,
+        t,
+      )}
+      {renderRateLimitBucketLine(
+        t('总 Token'),
+        status.tokens_remaining,
+        status.tokens_limit,
+        status.tokens_reset_time,
+        t,
+      )}
+      {status.retry_after_seconds !== undefined ? (
+        <div>
+          Retry-After: {status.retry_after_seconds} {t('秒')}
+        </div>
+      ) : null}
+      {isCoolingDown ? (
+        <div>
+          {t('冷却至')}: {formatRateLimitResetTime(cooldownUntil, t)}
+        </div>
+      ) : null}
+      <div>
+        {t('更新时间')}: {formatRateLimitObservedTime(status.observed_time, t)}
+      </div>
+    </div>
+  );
+
+  return (
+    <Tooltip content={details} position='top'>
+      <Tag color={tagColor} shape='circle'>
+        {isCoolingDown ? t('冷却中') : `${t('请求')} ${requestText}`}
+      </Tag>
+    </Tooltip>
+  );
+};
+
 const getUpstreamUpdateMeta = (record) => {
   const supported =
     !!record &&
@@ -523,6 +643,12 @@ export const getChannelsColumns = ({
       title: t('响应时间'),
       dataIndex: 'response_time',
       render: (text, record, index) => <div>{renderResponseTime(text, t)}</div>,
+    },
+    {
+      key: COLUMN_KEYS.UPSTREAM_RATE_LIMIT,
+      title: t('限流'),
+      dataIndex: 'upstream_rate_limit_status',
+      render: (text, record, index) => renderUpstreamRateLimitStatus(record, t),
     },
     {
       key: COLUMN_KEYS.BALANCE,
