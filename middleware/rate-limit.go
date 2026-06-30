@@ -94,9 +94,27 @@ func GlobalWebRateLimit() func(c *gin.Context) {
 	return defNext
 }
 
+func isGlobalAPIRateLimitExemptPath(path string) bool {
+	switch path {
+	case "/api/channel/search/keys",
+		"/api/channel/query-key/report",
+		"/api/channel/query-key/test":
+		return true
+	default:
+		return false
+	}
+}
+
 func GlobalAPIRateLimit() func(c *gin.Context) {
 	if common.GlobalApiRateLimitEnable {
-		return rateLimitFactory(common.GlobalApiRateLimitNum, common.GlobalApiRateLimitDuration, "GA")
+		rateLimiter := rateLimitFactory(common.GlobalApiRateLimitNum, common.GlobalApiRateLimitDuration, "GA")
+		return func(c *gin.Context) {
+			if isGlobalAPIRateLimitExemptPath(c.Request.URL.Path) {
+				c.Next()
+				return
+			}
+			rateLimiter(c)
+		}
 	}
 	return defNext
 }

@@ -220,9 +220,13 @@ const QueryKeyPage = () => {
 
     setLoading(true);
     try {
-      const res = await API.post('/api/channel/query-key/report', {
-        keys: parsed.keys,
-      });
+      const res = await API.post(
+        '/api/channel/query-key/report',
+        {
+          keys: parsed.keys,
+        },
+        { skipErrorHandler: true },
+      );
       const { success, message, data } = res.data || {};
       if (!success) {
         showError(message || t('查询失败'));
@@ -492,14 +496,18 @@ const QueryKeyPage = () => {
     });
 
     try {
-      const res = await API.post('/api/channel/query-key/test', {
-        key: item.key,
-        source: channel.source || 'channel',
-        target_id: channel.id,
-        model: options.model || DEFAULT_BATCH_TEST_MODEL,
-        endpoint_type: options.endpointType || '',
-        stream: Boolean(options.stream),
-      });
+      const res = await API.post(
+        '/api/channel/query-key/test',
+        {
+          key: item.key,
+          source: channel.source || 'channel',
+          target_id: channel.id,
+          model: options.model || DEFAULT_BATCH_TEST_MODEL,
+          endpoint_type: options.endpointType || '',
+          stream: Boolean(options.stream),
+        },
+        { skipErrorHandler: true },
+      );
       const payload = res.data || {};
       const result = {
         success: Boolean(payload.success),
