@@ -76,6 +76,7 @@ const ChannelsPage = () => {
       />
       <BatchImportModal
         visible={channelsData.showBatchImport}
+        groupOptions={channelsData.groupOptions}
         onCancel={() => channelsData.setShowBatchImport(false)}
         onSuccess={channelsData.refresh}
       />

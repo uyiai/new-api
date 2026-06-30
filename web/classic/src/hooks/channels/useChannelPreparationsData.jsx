@@ -1,3 +1,22 @@
+/*
+Copyright (C) 2025 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -156,17 +175,20 @@ export function useChannelPreparationsData() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    API.get('/api/group/', { skipErrorHandler: true })
-      .then((res) => {
-        if (res?.data?.success) {
-          setGroupOptions(buildGroupOptions(res.data.data, DEFAULT_GROUP));
-        }
-      })
-      .catch(() => {
-        setGroupOptions([{ label: DEFAULT_GROUP, value: DEFAULT_GROUP }]);
-      });
+  const loadGroupOptions = useCallback(async () => {
+    try {
+      const res = await API.get('/api/group/', { skipErrorHandler: true });
+      if (res?.data?.success) {
+        setGroupOptions(buildGroupOptions(res.data.data, DEFAULT_GROUP));
+        return;
+      }
+    } catch (error) {}
+    setGroupOptions([{ label: DEFAULT_GROUP, value: DEFAULT_GROUP }]);
   }, []);
+
+  useEffect(() => {
+    loadGroupOptions();
+  }, [loadGroupOptions]);
 
   const handleSearch = useCallback(() => {
     setActivePage(1);
@@ -191,14 +213,21 @@ export function useChannelPreparationsData() {
   );
 
   const openCreate = useCallback(() => {
+    loadGroupOptions();
     setEditingPreparation(null);
     setShowEdit(true);
-  }, []);
+  }, [loadGroupOptions]);
 
   const openEdit = useCallback((preparation) => {
+    loadGroupOptions();
     setEditingPreparation(preparation);
     setShowEdit(true);
-  }, []);
+  }, [loadGroupOptions]);
+
+  const openImport = useCallback(() => {
+    loadGroupOptions();
+    setShowImport(true);
+  }, [loadGroupOptions]);
 
   const closeEdit = useCallback(() => {
     setShowEdit(false);
@@ -214,12 +243,20 @@ export function useChannelPreparationsData() {
       if (!res.data.success) {
         throw new Error(res.data.message || t('保存失败'));
       }
-      showSuccess(isEdit ? t('候选渠道更新成功') : t('候选渠道创建成功'));
+      const createdCount = Number(res.data.data?.count || 0);
+      showSuccess(
+        isEdit
+          ? t('候选渠道更新成功')
+          : createdCount > 1
+            ? t('候选渠道创建成功：{{count}} 个', { count: createdCount })
+            : t('候选渠道创建成功'),
+      );
       closeEdit();
       refresh();
+      loadGroupOptions();
       return res.data.data;
     },
-    [closeEdit, refresh, t],
+    [closeEdit, loadGroupOptions, refresh, t],
   );
 
   const importPreparations = useCallback(
@@ -246,9 +283,10 @@ export function useChannelPreparationsData() {
         );
       }
       refresh();
+      loadGroupOptions();
       return results;
     },
-    [refresh, t],
+    [loadGroupOptions, refresh, t],
   );
 
   const testPreparation = useCallback(
@@ -705,6 +743,7 @@ export function useChannelPreparationsData() {
       total,
       preparationStats,
       groupOptions,
+      loadGroupOptions,
       keyword,
       setKeyword,
       group,
@@ -750,6 +789,7 @@ export function useChannelPreparationsData() {
       handlePageSizeChange,
       openCreate,
       openEdit,
+      openImport,
       closeEdit,
       savePreparation,
       importPreparations,
@@ -772,6 +812,7 @@ export function useChannelPreparationsData() {
       total,
       preparationStats,
       groupOptions,
+      loadGroupOptions,
       keyword,
       group,
       dateRange,
@@ -801,6 +842,7 @@ export function useChannelPreparationsData() {
       handlePageSizeChange,
       openCreate,
       openEdit,
+      openImport,
       closeEdit,
       savePreparation,
       importPreparations,

@@ -1,3 +1,22 @@
+/*
+Copyright (C) 2025 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+
 import React from 'react';
 import { Button, Typography } from '@douyinfe/semi-ui';
 import { IconPlus, IconUpload } from '@douyinfe/semi-icons';
@@ -22,11 +41,13 @@ const ChannelPreparationsPage = () => {
       <EditPreparationModal
         visible={data.showEdit}
         preparation={data.editingPreparation}
+        groupOptions={data.groupOptions}
         onCancel={data.closeEdit}
         onSubmit={data.savePreparation}
       />
       <ImportPreparationModal
         visible={data.showImport}
+        groupOptions={data.groupOptions}
         onCancel={() => data.setShowImport(false)}
         onSubmit={data.importPreparations}
       />
@@ -65,7 +86,7 @@ const ChannelPreparationsPage = () => {
                 theme='outline'
                 type='primary'
                 icon={<IconUpload />}
-                onClick={() => data.setShowImport(true)}
+                onClick={data.openImport}
                 className='w-full sm:w-auto'
               >
                 {data.t('导入候选渠道')}

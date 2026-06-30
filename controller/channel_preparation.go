@@ -15,6 +15,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type channelPreparationCreateRequest struct {
+	model.ChannelPreparation
+	Groups []string `json:"groups"`
+}
+
 type channelPreparationImportRequest struct {
 	Items []model.ChannelPreparation `json:"items"`
 }
@@ -97,9 +102,7 @@ func validateChannelPreparationInput(preparation *model.ChannelPreparation, isCr
 	if isCreate && preparation.Key == "" {
 		return fmt.Errorf("key cannot be empty")
 	}
-	if strings.TrimSpace(preparation.Group) == "" {
-		preparation.Group = "default"
-	}
+	preparation.Group = model.NormalizeChannelPreparationGroup(preparation.Group)
 	applyChannelPreparationDefaults(preparation)
 	model.NormalizeDirectAnthropicPreparationModels(preparation)
 	if preparation.Remark != nil && len(*preparation.Remark) > 255 {
@@ -114,6 +117,34 @@ func validateChannelPreparationInput(preparation *model.ChannelPreparation, isCr
 	return nil
 }
 
+func normalizeChannelPreparationCreateGroups(group string, groups []string) []string {
+	seen := make(map[string]bool, len(groups)+1)
+	normalizedGroups := make([]string, 0, len(groups)+1)
+	appendGroup := func(value string) {
+		normalized := model.NormalizeChannelPreparationGroup(value)
+		if seen[normalized] {
+			return
+		}
+		seen[normalized] = true
+		normalizedGroups = append(normalizedGroups, normalized)
+	}
+
+	if len(groups) > 0 {
+		for _, item := range groups {
+			if strings.TrimSpace(item) == "" {
+				continue
+			}
+			appendGroup(item)
+		}
+	} else {
+		appendGroup(group)
+	}
+	if len(normalizedGroups) == 0 {
+		appendGroup(group)
+	}
+	return normalizedGroups
+}
+
 func channelPreparationKeyConflictError(conflict model.ChannelPreparation) error {
 	statusText := "待晋升"
 	if conflict.Status == model.ChannelPreparationStatusPromoting {
@@ -123,16 +154,35 @@ func channelPreparationKeyConflictError(conflict model.ChannelPreparation) error
 	if name == "" {
 		name = "未命名"
 	}
-	return fmt.Errorf("Key 已存在于备货池%s候选渠道：%s（ID %d，%s）", statusText, conflict.KeyPreview(), conflict.Id, name)
+	return fmt.Errorf("Key 已存在于备货池%s候选渠道：%s（ID %d，%s，分组 %s）", statusText, conflict.KeyPreview(), conflict.Id, name, model.NormalizeChannelPreparationGroup(conflict.Group))
 }
 
-func checkChannelPreparationKeyConflict(key string, excludeID int) error {
-	conflicts, err := model.FindActiveChannelPreparationKeyConflicts([]string{key}, excludeID)
+func checkChannelPreparationKeyGroupConflict(key string, group string, excludeID int) error {
+	conflicts, err := model.FindActiveChannelPreparationKeyGroupConflicts([]model.ChannelPreparationKeyGroup{{Key: key, Group: group}}, excludeID)
 	if err != nil {
 		return err
 	}
-	if conflict, ok := conflicts[strings.TrimSpace(key)]; ok {
+	conflictKey := model.ChannelPreparationKeyGroupConflictKey(key, group)
+	if conflict, ok := conflicts[conflictKey]; ok {
 		return channelPreparationKeyConflictError(conflict)
+	}
+	return nil
+}
+
+func checkChannelPreparationKeyGroupConflicts(key string, groups []string, excludeID int) error {
+	pairs := make([]model.ChannelPreparationKeyGroup, 0, len(groups))
+	for _, group := range groups {
+		pairs = append(pairs, model.ChannelPreparationKeyGroup{Key: key, Group: group})
+	}
+	conflicts, err := model.FindActiveChannelPreparationKeyGroupConflicts(pairs, excludeID)
+	if err != nil {
+		return err
+	}
+	for _, group := range groups {
+		conflictKey := model.ChannelPreparationKeyGroupConflictKey(key, group)
+		if conflict, ok := conflicts[conflictKey]; ok {
+			return channelPreparationKeyConflictError(conflict)
+		}
 	}
 	return nil
 }
@@ -265,25 +315,50 @@ func TestChannelPreparation(c *gin.Context) {
 }
 
 func AddChannelPreparation(c *gin.Context) {
-	var preparation model.ChannelPreparation
-	if err := c.ShouldBindJSON(&preparation); err != nil {
+	var request channelPreparationCreateRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
 		common.ApiError(c, err)
 		return
 	}
+	preparation := request.ChannelPreparation
+	groups := normalizeChannelPreparationCreateGroups(preparation.Group, request.Groups)
+	preparation.Group = groups[0]
 	if err := validateChannelPreparationInput(&preparation, true); err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	if err := checkChannelPreparationKeyConflict(preparation.Key, 0); err != nil {
+	if err := checkChannelPreparationKeyGroupConflicts(preparation.Key, groups, 0); err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	preparation.NormalizeForCreate()
-	if err := model.DB.Create(&preparation).Error; err != nil {
+
+	tx := model.DB.Begin()
+	if tx.Error != nil {
+		common.ApiError(c, tx.Error)
+		return
+	}
+	responses := make([]model.ChannelPreparationResponse, 0, len(groups))
+	for _, group := range groups {
+		item := preparation
+		item.Group = group
+		item.NormalizeForCreate()
+		if err := tx.Create(&item).Error; err != nil {
+			tx.Rollback()
+			common.ApiError(c, err)
+			return
+		}
+		response := item.ToResponse()
+		responses = append(responses, response)
+	}
+	if err := tx.Commit().Error; err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	common.ApiSuccess(c, preparation.ToResponse())
+	if len(responses) == 1 {
+		common.ApiSuccess(c, responses[0])
+		return
+	}
+	common.ApiSuccess(c, gin.H{"items": responses, "count": len(responses)})
 }
 
 func UpdateChannelPreparation(c *gin.Context) {
@@ -311,7 +386,7 @@ func UpdateChannelPreparation(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	if err := checkChannelPreparationKeyConflict(input.Key, existing.Id); err != nil {
+	if err := checkChannelPreparationKeyGroupConflict(input.Key, input.Group, existing.Id); err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -351,7 +426,7 @@ func ImportChannelPreparations(c *gin.Context) {
 	resultSet := make([]bool, len(request.Items))
 	normalizedItems := make([]model.ChannelPreparation, len(request.Items))
 	validIndexes := make([]int, 0, len(request.Items))
-	validKeys := make([]string, 0, len(request.Items))
+	validPairs := make([]model.ChannelPreparationKeyGroup, 0, len(request.Items))
 
 	for index, item := range request.Items {
 		if strings.TrimSpace(item.Source) == "" {
@@ -365,10 +440,10 @@ func ImportChannelPreparations(c *gin.Context) {
 		item.NormalizeForCreate()
 		normalizedItems[index] = item
 		validIndexes = append(validIndexes, index)
-		validKeys = append(validKeys, item.Key)
+		validPairs = append(validPairs, model.ChannelPreparationKeyGroup{Key: item.Key, Group: item.Group})
 	}
 
-	dbConflicts, err := model.FindActiveChannelPreparationKeyConflicts(validKeys, 0)
+	dbConflicts, err := model.FindActiveChannelPreparationKeyGroupConflicts(validPairs, 0)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -378,19 +453,20 @@ func ImportChannelPreparations(c *gin.Context) {
 	for _, index := range validIndexes {
 		item := normalizedItems[index]
 		key := strings.TrimSpace(item.Key)
-		if firstIndex, ok := seenImportKeys[key]; ok {
+		conflictKey := model.ChannelPreparationKeyGroupConflictKey(key, item.Group)
+		if firstIndex, ok := seenImportKeys[conflictKey]; ok {
 			resultsByIndex[index] = channelPreparationImportResult{
 				Index: index,
 				Name:  item.Name,
 				Ok:    false,
-				Error: fmt.Sprintf("本次导入重复：第 %d 条已包含相同 Key", firstIndex+1),
+				Error: fmt.Sprintf("本次导入重复：第 %d 条已包含相同 Key 和分组", firstIndex+1),
 			}
 			resultSet[index] = true
 			continue
 		}
-		seenImportKeys[key] = index
+		seenImportKeys[conflictKey] = index
 
-		if conflict, ok := dbConflicts[key]; ok {
+		if conflict, ok := dbConflicts[conflictKey]; ok {
 			resultsByIndex[index] = channelPreparationImportResult{Index: index, Name: item.Name, Ok: false, Error: channelPreparationKeyConflictError(conflict).Error()}
 			resultSet[index] = true
 			continue

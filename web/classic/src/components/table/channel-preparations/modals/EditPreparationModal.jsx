@@ -1,3 +1,22 @@
+/*
+Copyright (C) 2025 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Button,
@@ -12,8 +31,6 @@ import { CHANNEL_OPTIONS } from '../../../../constants/channel.constants';
 import {
   getChannelModels,
   loadChannelModels,
-  API,
-  buildGroupOptions,
   showError,
 } from '../../../../helpers';
 import { appendKeyFragment } from '../keyFragment';
@@ -27,6 +44,7 @@ const emptyForm = {
   base_url: '',
   models: '',
   group: 'default',
+  groups: ['default'],
   balance: 0,
   priority: 0,
   weight: 0,
@@ -37,26 +55,30 @@ const emptyForm = {
 
 const getModelText = (type) => getChannelModels(type).join(',');
 
-const EditPreparationModal = ({ visible, preparation, onCancel, onSubmit }) => {
+const normalizeGroups = (value) => {
+  const rawGroups = Array.isArray(value) ? value : [value];
+  const groups = rawGroups
+    .map((item) => String(item || '').trim())
+    .filter(Boolean);
+  const uniqueGroups = Array.from(new Set(groups));
+  return uniqueGroups.length > 0 ? uniqueGroups : ['default'];
+};
+
+const EditPreparationModal = ({
+  visible,
+  preparation,
+  groupOptions,
+  onCancel,
+  onSubmit,
+}) => {
   const { t } = useTranslation();
   const [form, setForm] = useState(emptyForm);
   const [submitting, setSubmitting] = useState(false);
-  const [groupOptions, setGroupOptions] = useState([
-    { label: 'default', value: 'default' },
-  ]);
-
   const isEdit = Boolean(preparation?.id);
 
   useEffect(() => {
     if (!visible) return;
     loadChannelModels().catch(() => {});
-    API.get('/api/group/')
-      .then((res) => {
-        if (res.data.success) {
-          setGroupOptions(buildGroupOptions(res.data.data));
-        }
-      })
-      .catch(() => {});
   }, [visible]);
 
   useEffect(() => {
@@ -73,6 +95,7 @@ const EditPreparationModal = ({ visible, preparation, onCancel, onSubmit }) => {
         priority: preparation.priority ?? 0,
         weight: preparation.weight ?? 0,
         group: preparation.group || 'default',
+        groups: [preparation.group || 'default'],
       });
     } else {
       setForm({ ...emptyForm });
@@ -110,8 +133,11 @@ const EditPreparationModal = ({ visible, preparation, onCancel, onSubmit }) => {
     }
     setSubmitting(true);
     try {
+      const groups = normalizeGroups(isEdit ? form.group : form.groups);
       const payload = {
         ...form,
+        group: groups[0],
+        groups: isEdit ? undefined : groups,
         name: appendKeyFragment(form.name.trim(), form.key),
         id: preparation?.id,
         type: Number(form.type),
@@ -181,9 +207,18 @@ const EditPreparationModal = ({ visible, preparation, onCancel, onSubmit }) => {
         <div>
           <div className='mb-1 font-semibold'>{t('分组')}</div>
           <Select
-            value={form.group}
-            optionList={groupOptions}
-            onChange={(value) => update('group', value || 'default')}
+            value={isEdit ? form.group : form.groups}
+            optionList={groupOptions || []}
+            multiple={!isEdit}
+            allowCreate
+            filter
+            showClear={!isEdit}
+            placeholder={t('请选择分组')}
+            onChange={(value) =>
+              isEdit
+                ? update('group', value || 'default')
+                : update('groups', normalizeGroups(value))
+            }
             style={{ width: '100%' }}
           />
         </div>

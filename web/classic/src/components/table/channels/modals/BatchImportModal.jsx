@@ -34,12 +34,7 @@ import {
   TextArea,
 } from '@douyinfe/semi-ui';
 import { IconUpload } from '@douyinfe/semi-icons';
-import {
-  API,
-  buildGroupOptions,
-  showSuccess,
-  showError,
-} from '../../../../helpers';
+import { API, showSuccess, showError } from '../../../../helpers';
 import { getChannelModels } from '../../../../helpers';
 
 const { Text } = Typography;
@@ -66,6 +61,15 @@ function generateTimestamp() {
 
 function generateChannelName(balance, suffix, timestamp) {
   return `${timestamp}-${balance}-${suffix}`;
+}
+
+function normalizeGroups(value) {
+  const rawGroups = Array.isArray(value) ? value : [value];
+  const groups = rawGroups
+    .map((item) => String(item || '').trim())
+    .filter(Boolean);
+  const uniqueGroups = Array.from(new Set(groups));
+  return uniqueGroups.length > 0 ? uniqueGroups : [DEFAULT_GROUP];
 }
 
 function parseBatchInput(text, suffix, timestamp) {
@@ -113,20 +117,16 @@ function parseBatchInput(text, suffix, timestamp) {
 // Component
 // ============================================================================
 
-const BatchImportModal = ({ visible, onCancel, onSuccess }) => {
+const BatchImportModal = ({ visible, groupOptions = [], onCancel, onSuccess }) => {
   const { t } = useTranslation();
 
   // Form state
   const [inputText, setInputText] = useState('');
   const [nameSuffix, setNameSuffix] = useState('');
   const [models, setModels] = useState('');
-  const [group, setGroup] = useState(DEFAULT_GROUP);
+  const [groups, setGroups] = useState([DEFAULT_GROUP]);
   const [priority, setPriority] = useState(0);
   const [weight, setWeight] = useState(0);
-  const [groupOptions, setGroupOptions] = useState([
-    { label: DEFAULT_GROUP, value: DEFAULT_GROUP },
-  ]);
-
   // Import state
   const [importState, setImportState] = useState('idle'); // idle | importing | done
   const [results, setResults] = useState([]);
@@ -140,21 +140,6 @@ const BatchImportModal = ({ visible, onCancel, onSuccess }) => {
     return getChannelModels(ANTHROPIC_CHANNEL_TYPE).join(',');
   }, []);
 
-  const fetchGroups = useCallback(async () => {
-    try {
-      const res = await API.get('/api/group/');
-      setGroupOptions(buildGroupOptions(res?.data?.data, DEFAULT_GROUP));
-    } catch (error) {
-      showError(error.message);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (visible) {
-      fetchGroups();
-    }
-  }, [visible, fetchGroups]);
-
   // Parse input for preview
   const parsed = useMemo(() => {
     if (!inputText.trim() || !nameSuffix.trim()) {
@@ -163,12 +148,26 @@ const BatchImportModal = ({ visible, onCancel, onSuccess }) => {
     return parseBatchInput(inputText, nameSuffix.trim(), timestamp);
   }, [inputText, nameSuffix, timestamp]);
 
+  const selectedGroups = useMemo(() => normalizeGroups(groups), [groups]);
+
+  const importEntries = useMemo(
+    () =>
+      parsed.entries.flatMap((entry) =>
+        selectedGroups.map((group) => ({
+          ...entry,
+          group,
+          importKey: `${entry.lineNumber}-${group}`,
+        })),
+      ),
+    [parsed.entries, selectedGroups],
+  );
+
   // Reset all state
   const resetState = useCallback(() => {
     setInputText('');
     setNameSuffix('');
     setModels('');
-    setGroup(DEFAULT_GROUP);
+    setGroups([DEFAULT_GROUP]);
     setPriority(0);
     setWeight(0);
     setImportState('idle');
@@ -185,7 +184,7 @@ const BatchImportModal = ({ visible, onCancel, onSuccess }) => {
 
   // Execute import
   const handleImport = useCallback(async () => {
-    if (parsed.entries.length === 0) return;
+    if (importEntries.length === 0) return;
 
     setImportState('importing');
     setResults([]);
@@ -193,10 +192,10 @@ const BatchImportModal = ({ visible, onCancel, onSuccess }) => {
 
     const finalModels = models.trim() || defaultModels;
     const importResults = [];
-    const total = parsed.entries.length;
+    const total = importEntries.length;
 
     for (let i = 0; i < total; i++) {
-      const entry = parsed.entries[i];
+      const entry = importEntries[i];
       try {
         const res = await API.post('/api/channel/', {
           mode: 'single',
@@ -205,7 +204,7 @@ const BatchImportModal = ({ visible, onCancel, onSuccess }) => {
             type: ANTHROPIC_CHANNEL_TYPE,
             key: entry.key,
             models: finalModels,
-            group: group,
+            group: entry.group,
             balance: entry.balance,
             status: 1,
             auto_ban: 1,
@@ -254,10 +253,9 @@ const BatchImportModal = ({ visible, onCancel, onSuccess }) => {
 
     if (onSuccess) onSuccess();
   }, [
-    parsed.entries,
+    importEntries,
     models,
     defaultModels,
-    group,
     weight,
     priority,
     onSuccess,
@@ -266,9 +264,13 @@ const BatchImportModal = ({ visible, onCancel, onSuccess }) => {
 
   const canImport =
     importState === 'idle' &&
-    parsed.entries.length > 0 &&
+    importEntries.length > 0 &&
     parsed.errors.length === 0 &&
     nameSuffix.trim().length > 0;
+
+  const keyCount = parsed.entries.length;
+  const groupCount = selectedGroups.length;
+  const totalImportCount = importEntries.length;
 
   const successCount = results.filter((r) => r.success).length;
   const failCount = results.filter((r) => !r.success).length;
@@ -297,6 +299,11 @@ const BatchImportModal = ({ visible, onCancel, onSuccess }) => {
       width: 80,
       align: 'right',
       render: (val) => `$${val}`,
+    },
+    {
+      title: t('分组'),
+      dataIndex: 'group',
+      width: 100,
     },
     {
       title: t('密钥前缀'),
@@ -383,7 +390,7 @@ const BatchImportModal = ({ visible, onCancel, onSuccess }) => {
                 ? t('导入中...')
                 : t('导入 ({{count}} 条)').replace(
                     '{{count}}',
-                    parsed.entries.length,
+                    totalImportCount,
                   )}
             </Button>
           )}
@@ -423,9 +430,13 @@ const BatchImportModal = ({ visible, onCancel, onSuccess }) => {
           </div>
           <Select
             placeholder='default'
-            value={group}
-            optionList={groupOptions}
-            onChange={(value) => setGroup(value || DEFAULT_GROUP)}
+            value={groups}
+            optionList={groupOptions || []}
+            multiple
+            allowCreate
+            filter
+            showClear
+            onChange={(value) => setGroups(normalizeGroups(value))}
             disabled={importState !== 'idle'}
             style={{ width: '100%' }}
           />
@@ -512,20 +523,21 @@ const BatchImportModal = ({ visible, onCancel, onSuccess }) => {
             >
               <Text strong>{t('预览')}</Text>
               <Text type='tertiary' size='small'>
+                {t('Key 数量')} {keyCount} · {t('分组数量')} {groupCount} ·{' '}
                 {t('共 {{count}} 条').replace(
                   '{{count}}',
-                  parsed.entries.length,
+                  totalImportCount,
                 )}
               </Text>
             </div>
             <Table
               columns={columns}
-              dataSource={parsed.entries}
+              dataSource={importEntries}
               pagination={false}
               size='small'
               bordered
               style={{ maxHeight: 250, overflow: 'auto' }}
-              rowKey='lineNumber'
+              rowKey='importKey'
             />
           </div>
         )}
@@ -541,14 +553,14 @@ const BatchImportModal = ({ visible, onCancel, onSuccess }) => {
               }}
             >
               <Text size='small' type='tertiary'>
-                {t('导入中...')} {progress}/{parsed.entries.length}
+                {t('导入中...')} {progress}/{totalImportCount}
               </Text>
               <Text size='small' type='tertiary'>
-                {Math.round((progress / parsed.entries.length) * 100)}%
+                {Math.round((progress / totalImportCount) * 100)}%
               </Text>
             </div>
             <Progress
-              percent={Math.round((progress / parsed.entries.length) * 100)}
+              percent={Math.round((progress / totalImportCount) * 100)}
               showInfo={false}
             />
           </div>

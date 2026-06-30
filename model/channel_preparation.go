@@ -129,9 +129,7 @@ func (p *ChannelPreparation) NormalizeForCreate() {
 	p.TestMessage = ""
 	p.PromotedTime = nil
 	p.PromotedChannelId = nil
-	if strings.TrimSpace(p.Group) == "" {
-		p.Group = "default"
-	}
+	p.Group = NormalizeChannelPreparationGroup(p.Group)
 	if p.AutoBan == nil {
 		defaultAutoBan := 1
 		p.AutoBan = &defaultAutoBan
@@ -152,9 +150,7 @@ func (p *ChannelPreparation) NormalizeForUpdate(existing *ChannelPreparation) {
 	if strings.TrimSpace(p.Key) == "" {
 		p.Key = existing.Key
 	}
-	if strings.TrimSpace(p.Group) == "" {
-		p.Group = "default"
-	}
+	p.Group = NormalizeChannelPreparationGroup(p.Group)
 	if p.AutoBan == nil {
 		defaultAutoBan := 1
 		p.AutoBan = &defaultAutoBan
@@ -219,6 +215,81 @@ func ChannelPreparationResponses(preparations []ChannelPreparation) []ChannelPre
 	return responses
 }
 
+type ChannelPreparationKeyGroup struct {
+	Key   string
+	Group string
+}
+
+func NormalizeChannelPreparationGroup(group string) string {
+	normalized := strings.TrimSpace(group)
+	if normalized == "" {
+		return "default"
+	}
+	return normalized
+}
+
+func ChannelPreparationKeyGroupConflictKey(key string, group string) string {
+	return strings.TrimSpace(key) + "\x00" + NormalizeChannelPreparationGroup(group)
+}
+
+func FindActiveChannelPreparationKeyGroupConflicts(pairs []ChannelPreparationKeyGroup, excludeID int) (map[string]ChannelPreparation, error) {
+	normalizedKeys := make([]string, 0, len(pairs))
+	normalizedGroups := make([]string, 0, len(pairs))
+	wanted := make(map[string]bool, len(pairs))
+	seenKeys := make(map[string]bool, len(pairs))
+	seenGroups := make(map[string]bool, len(pairs))
+	for _, pair := range pairs {
+		key := strings.TrimSpace(pair.Key)
+		if key == "" {
+			continue
+		}
+		group := NormalizeChannelPreparationGroup(pair.Group)
+		wanted[ChannelPreparationKeyGroupConflictKey(key, group)] = true
+		if !seenKeys[key] {
+			seenKeys[key] = true
+			normalizedKeys = append(normalizedKeys, key)
+		}
+		if !seenGroups[group] {
+			seenGroups[group] = true
+			normalizedGroups = append(normalizedGroups, group)
+		}
+	}
+	if len(wanted) == 0 {
+		return map[string]ChannelPreparation{}, nil
+	}
+
+	activeStatuses := []int{ChannelPreparationStatusPending, ChannelPreparationStatusPromoting}
+	query := DB.Model(&ChannelPreparation{}).
+		Select("id, "+commonKeyCol+", "+commonGroupCol+", name, status").
+		Where("status IN ?", activeStatuses).
+		Where("TRIM("+commonKeyCol+") IN ?", normalizedKeys).
+		Where("TRIM("+commonGroupCol+") IN ?", normalizedGroups)
+	if excludeID > 0 {
+		query = query.Where("id <> ?", excludeID)
+	}
+
+	var conflicts []ChannelPreparation
+	if err := query.Order("id asc").Find(&conflicts).Error; err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]ChannelPreparation, len(conflicts))
+	for _, conflict := range conflicts {
+		normalizedKey := strings.TrimSpace(conflict.Key)
+		if normalizedKey == "" {
+			continue
+		}
+		conflictKey := ChannelPreparationKeyGroupConflictKey(normalizedKey, conflict.Group)
+		if !wanted[conflictKey] {
+			continue
+		}
+		if _, exists := result[conflictKey]; !exists {
+			result[conflictKey] = conflict
+		}
+	}
+	return result, nil
+}
+
 func FindActiveChannelPreparationKeyConflicts(keys []string, excludeID int) (map[string]ChannelPreparation, error) {
 	normalizedKeys := make([]string, 0, len(keys))
 	seen := make(map[string]bool, len(keys))
@@ -262,10 +333,7 @@ func FindActiveChannelPreparationKeyConflicts(keys []string, excludeID int) (map
 }
 
 func (p *ChannelPreparation) ToChannel() *Channel {
-	group := p.Group
-	if strings.TrimSpace(group) == "" {
-		group = "default"
-	}
+	group := NormalizeChannelPreparationGroup(p.Group)
 	autoBan := p.AutoBan
 	if autoBan == nil {
 		defaultAutoBan := 1

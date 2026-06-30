@@ -1,3 +1,22 @@
+/*
+Copyright (C) 2025 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Button,
@@ -12,8 +31,6 @@ import {
 } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import {
-  API,
-  buildGroupOptions,
   getChannelModels,
   loadChannelModels,
   showError,
@@ -31,6 +48,15 @@ const generateTimestamp = () => {
 
 const generateChannelName = (balance, suffix, timestamp, key) => {
   return appendKeyFragment(`${timestamp}-${balance}-${suffix}`, key);
+};
+
+const normalizeGroups = (value) => {
+  const rawGroups = Array.isArray(value) ? value : [value];
+  const groups = rawGroups
+    .map((item) => String(item || '').trim())
+    .filter(Boolean);
+  const uniqueGroups = Array.from(new Set(groups));
+  return uniqueGroups.length > 0 ? uniqueGroups : [DEFAULT_GROUP];
 };
 
 const parseBatchInput = (text, suffix, timestamp) => {
@@ -69,17 +95,19 @@ const parseBatchInput = (text, suffix, timestamp) => {
   return { entries, errors };
 };
 
-const ImportPreparationModal = ({ visible, onCancel, onSubmit }) => {
+const ImportPreparationModal = ({
+  visible,
+  groupOptions = [],
+  onCancel,
+  onSubmit,
+}) => {
   const { t } = useTranslation();
   const [inputText, setInputText] = useState('');
   const [nameSuffix, setNameSuffix] = useState('');
   const [models, setModels] = useState('');
-  const [group, setGroup] = useState(DEFAULT_GROUP);
+  const [groups, setGroups] = useState([DEFAULT_GROUP]);
   const [priority, setPriority] = useState(0);
   const [weight, setWeight] = useState(0);
-  const [groupOptions, setGroupOptions] = useState([
-    { label: DEFAULT_GROUP, value: DEFAULT_GROUP },
-  ]);
   const [importing, setImporting] = useState(false);
   const [results, setResults] = useState([]);
   const timestamp = useMemo(() => generateTimestamp(), [visible]);
@@ -87,11 +115,6 @@ const ImportPreparationModal = ({ visible, onCancel, onSubmit }) => {
   useEffect(() => {
     if (!visible) return;
     loadChannelModels().catch(() => {});
-    API.get('/api/group/')
-      .then((res) => {
-        setGroupOptions(buildGroupOptions(res?.data?.data, DEFAULT_GROUP));
-      })
-      .catch((error) => showError(error.message));
   }, [visible]);
 
   const defaultModels = useMemo(
@@ -102,9 +125,13 @@ const ImportPreparationModal = ({ visible, onCancel, onSubmit }) => {
     () => parseBatchInput(inputText, nameSuffix, timestamp),
     [inputText, nameSuffix, timestamp],
   );
+  const selectedGroups = useMemo(() => normalizeGroups(groups), [groups]);
+  const totalImportCount = parsed.entries.length * selectedGroups.length;
   const totalBalance = useMemo(
-    () => parsed.entries.reduce((sum, entry) => sum + entry.balance, 0),
-    [parsed.entries],
+    () =>
+      parsed.entries.reduce((sum, entry) => sum + entry.balance, 0) *
+      selectedGroups.length,
+    [parsed.entries, selectedGroups.length],
   );
   const formattedTotalBalance = useMemo(
     () =>
@@ -122,15 +149,15 @@ const ImportPreparationModal = ({ visible, onCancel, onSubmit }) => {
     [results],
   );
   const progress =
-    parsed.entries.length === 0
+    totalImportCount === 0
       ? 0
-      : Math.round((successResults.length / parsed.entries.length) * 100);
+      : Math.round((successResults.length / totalImportCount) * 100);
 
   const reset = () => {
     setInputText('');
     setNameSuffix('');
     setModels('');
-    setGroup(DEFAULT_GROUP);
+    setGroups([DEFAULT_GROUP]);
     setPriority(0);
     setWeight(0);
     setResults([]);
@@ -148,18 +175,20 @@ const ImportPreparationModal = ({ visible, onCancel, onSubmit }) => {
     setResults([]);
     try {
       const finalModels = models.trim();
-      const items = parsed.entries.map((entry) => ({
-        name: entry.name,
-        type: ANTHROPIC_CHANNEL_TYPE,
-        key: entry.key,
-        models: finalModels,
-        group,
-        balance: entry.balance,
-        priority: Number(priority) || 0,
-        weight: Number(weight) || 0,
-        auto_ban: 1,
-        source: 'batch_import',
-      }));
+      const items = parsed.entries.flatMap((entry) =>
+        selectedGroups.map((group) => ({
+          name: entry.name,
+          type: ANTHROPIC_CHANNEL_TYPE,
+          key: entry.key,
+          models: finalModels,
+          group,
+          balance: entry.balance,
+          priority: Number(priority) || 0,
+          weight: Number(weight) || 0,
+          auto_ban: 1,
+          source: 'batch_import',
+        })),
+      );
       const importResults = await onSubmit(items);
       setResults(importResults);
     } catch (error) {
@@ -172,6 +201,12 @@ const ImportPreparationModal = ({ visible, onCancel, onSubmit }) => {
   const previewColumns = [
     { title: t('名称'), dataIndex: 'name', key: 'name' },
     { title: t('余额'), dataIndex: 'balance', key: 'balance', width: 100 },
+    {
+      title: t('分组'),
+      key: 'groups',
+      width: 160,
+      render: () => selectedGroups.join(', '),
+    },
     {
       title: 'Key',
       dataIndex: 'key',
@@ -218,9 +253,14 @@ const ImportPreparationModal = ({ visible, onCancel, onSubmit }) => {
           <div>
             <div className='mb-1 font-semibold'>{t('分组')}</div>
             <Select
-              value={group}
-              optionList={groupOptions}
-              onChange={(value) => setGroup(value || DEFAULT_GROUP)}
+              value={groups}
+              optionList={groupOptions || []}
+              multiple
+              allowCreate
+              filter
+              showClear
+              placeholder={t('请选择分组')}
+              onChange={(value) => setGroups(normalizeGroups(value))}
               style={{ width: '100%' }}
             />
           </div>
@@ -264,6 +304,18 @@ const ImportPreparationModal = ({ visible, onCancel, onSubmit }) => {
               {t('Key 数量')}{' '}
               <span className='font-semibold text-gray-900'>
                 {parsed.entries.length}
+              </span>
+            </span>
+            <span>
+              {t('分组数量')}{' '}
+              <span className='font-semibold text-gray-900'>
+                {selectedGroups.length}
+              </span>
+            </span>
+            <span>
+              {t('导入条数')}{' '}
+              <span className='font-semibold text-gray-900'>
+                {totalImportCount}
               </span>
             </span>
             <span>
