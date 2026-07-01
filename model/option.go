@@ -190,6 +190,7 @@ func InitOptionMap() {
 	common.OptionMapRWMutex.Unlock()
 	loadOptionsFromDatabase()
 	backfillRequiredModelRatioOptions()
+	backfillRequiredCompletionRatioOptions()
 }
 
 func loadOptionsFromDatabase() {
@@ -204,25 +205,38 @@ func loadOptionsFromDatabase() {
 
 var requiredModelRatioBackfills = map[string]float64{
 	"claude-sonnet-4-6": 1.5,
+	"claude-sonnet-5":   1,
+}
+
+var requiredCompletionRatioBackfills = map[string]float64{
+	"claude-sonnet-5": 5,
 }
 
 func backfillRequiredModelRatioOptions() {
+	backfillRequiredRatioOptions("ModelRatio", requiredModelRatioBackfills)
+}
+
+func backfillRequiredCompletionRatioOptions() {
+	backfillRequiredRatioOptions("CompletionRatio", requiredCompletionRatioBackfills)
+}
+
+func backfillRequiredRatioOptions(optionKey string, requiredBackfills map[string]float64) {
 	var option Option
-	if err := DB.First(&option, "key = ?", "ModelRatio").Error; err != nil {
+	if err := DB.First(&option, "key = ?", optionKey).Error; err != nil {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			common.SysLog("failed to load model ratio option for backfill: " + err.Error())
+			common.SysLog("failed to load " + optionKey + " option for backfill: " + err.Error())
 		}
 		return
 	}
 
 	ratioMap := make(map[string]float64)
 	if err := common.Unmarshal([]byte(option.Value), &ratioMap); err != nil {
-		common.SysLog("failed to parse model ratio option for backfill: " + err.Error())
+		common.SysLog("failed to parse " + optionKey + " option for backfill: " + err.Error())
 		return
 	}
 
 	changed := false
-	for modelName, defaultRatio := range requiredModelRatioBackfills {
+	for modelName, defaultRatio := range requiredBackfills {
 		if _, ok := ratioMap[modelName]; ok {
 			continue
 		}
@@ -240,16 +254,16 @@ func backfillRequiredModelRatioOptions() {
 
 	payload, err := common.Marshal(ratioMap)
 	if err != nil {
-		common.SysLog("failed to marshal model ratio option for backfill: " + err.Error())
+		common.SysLog("failed to marshal " + optionKey + " option for backfill: " + err.Error())
 		return
 	}
 	option.Value = string(payload)
 	if err := DB.Save(&option).Error; err != nil {
-		common.SysLog("failed to save model ratio option backfill: " + err.Error())
+		common.SysLog("failed to save " + optionKey + " option backfill: " + err.Error())
 		return
 	}
-	if err := updateOptionMap("ModelRatio", option.Value); err != nil {
-		common.SysLog("failed to reload model ratio option after backfill: " + err.Error())
+	if err := updateOptionMap(optionKey, option.Value); err != nil {
+		common.SysLog("failed to reload " + optionKey + " option after backfill: " + err.Error())
 	}
 }
 

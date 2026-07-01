@@ -12,7 +12,7 @@ func TestNormalizeDirectAnthropicModelListReplacesRetiredAndDeduplicates(t *test
 	models, changed := NormalizeDirectAnthropicModelList(" claude-3-sonnet-20240229,claude-sonnet-4-6,claude-3-opus-20240229 ")
 
 	require.True(t, changed)
-	require.Equal(t, "claude-sonnet-4-6,claude-opus-4-8", models)
+	require.Equal(t, "claude-sonnet-4-6,claude-opus-4-8,claude-sonnet-5", models)
 }
 
 func TestNormalizeDirectAnthropicChannelModelsOnlyTouchesDirectAnthropic(t *testing.T) {
@@ -21,7 +21,7 @@ func TestNormalizeDirectAnthropicChannelModelsOnlyTouchesDirectAnthropic(t *test
 		Models: "claude-3-sonnet-20240229,claude-3-haiku-20240307",
 	}
 	require.True(t, NormalizeDirectAnthropicChannelModels(anthropic))
-	require.Equal(t, "claude-sonnet-4-6,claude-haiku-4-5-20251001", anthropic.Models)
+	require.Equal(t, "claude-sonnet-4-6,claude-haiku-4-5-20251001,claude-sonnet-5", anthropic.Models)
 
 	aws := &Channel{
 		Type:   constant.ChannelTypeAws,
@@ -64,19 +64,20 @@ func TestNormalizeRetiredDirectAnthropicModelsInDatabase(t *testing.T) {
 
 	var gotChannel Channel
 	require.NoError(t, DB.First(&gotChannel, "id = ?", channel.Id).Error)
-	require.Equal(t, "claude-sonnet-4-6,claude-opus-4-8", gotChannel.Models)
+	require.Equal(t, "claude-sonnet-4-6,claude-opus-4-8,claude-sonnet-5", gotChannel.Models)
 	require.NotNil(t, gotChannel.TestModel)
 	require.Equal(t, "claude-sonnet-4-6", *gotChannel.TestModel)
 
 	var abilities []Ability
 	require.NoError(t, DB.Where("channel_id = ?", channel.Id).Order("model asc").Find(&abilities).Error)
-	require.Len(t, abilities, 2)
+	require.Len(t, abilities, 3)
 	require.Equal(t, "claude-opus-4-8", abilities[0].Model)
 	require.Equal(t, "claude-sonnet-4-6", abilities[1].Model)
+	require.Equal(t, "claude-sonnet-5", abilities[2].Model)
 
 	var gotPreparation ChannelPreparation
 	require.NoError(t, DB.First(&gotPreparation, "id = ?", preparation.Id).Error)
-	require.Equal(t, "claude-haiku-4-5-20251001", gotPreparation.Models)
+	require.Equal(t, "claude-haiku-4-5-20251001,claude-sonnet-5", gotPreparation.Models)
 	require.NotNil(t, gotPreparation.TestModel)
 	require.Equal(t, "claude-haiku-4-5-20251001", *gotPreparation.TestModel)
 }

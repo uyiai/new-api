@@ -8,6 +8,10 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 )
 
+var requiredDirectAnthropicModels = []string{
+	"claude-sonnet-5",
+}
+
 var retiredDirectAnthropicModelReplacements = map[string]string{
 	"claude-2.0":                          "claude-opus-4-8",
 	"claude-2.1":                          "claude-opus-4-8",
@@ -64,6 +68,15 @@ func NormalizeDirectAnthropicModelList(models string) (string, bool) {
 		normalized = append(normalized, modelName)
 	}
 
+	for _, requiredModel := range requiredDirectAnthropicModels {
+		if _, ok := seen[requiredModel]; ok {
+			continue
+		}
+		seen[requiredModel] = struct{}{}
+		normalized = append(normalized, requiredModel)
+		changed = true
+	}
+
 	result := strings.Join(normalized, ",")
 	if result != strings.Trim(strings.TrimSpace(models), ",") {
 		changed = true
@@ -117,7 +130,7 @@ func NormalizeRetiredDirectAnthropicModelsInDatabase() error {
 		return err
 	}
 	if channelCount > 0 || preparationCount > 0 {
-		common.SysLog(fmt.Sprintf("normalized retired direct Anthropic models: channels=%d, preparations=%d", channelCount, preparationCount))
+		common.SysLog(fmt.Sprintf("normalized direct Anthropic models: channels=%d, preparations=%d", channelCount, preparationCount))
 	}
 	return nil
 }
