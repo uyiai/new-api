@@ -12,7 +12,18 @@ func TestNormalizeDirectAnthropicModelListReplacesRetiredAndDeduplicates(t *test
 	models, changed := NormalizeDirectAnthropicModelList(" claude-3-sonnet-20240229,claude-sonnet-4-6,claude-3-opus-20240229 ")
 
 	require.True(t, changed)
-	require.Equal(t, "claude-sonnet-4-6,claude-opus-4-8,claude-sonnet-5", models)
+	require.Equal(t, "claude-sonnet-4-6,claude-opus-4-8", models)
+}
+
+func TestEnsureRequiredDirectAnthropicModelListAppendsRequiredModels(t *testing.T) {
+	models, changed := EnsureRequiredDirectAnthropicModelList("claude-sonnet-4-6")
+
+	require.True(t, changed)
+	require.Equal(t, "claude-sonnet-4-6,claude-sonnet-5", models)
+
+	models, changed = EnsureRequiredDirectAnthropicModelList("claude-sonnet-4-6,claude-sonnet-5")
+	require.False(t, changed)
+	require.Equal(t, "claude-sonnet-4-6,claude-sonnet-5", models)
 }
 
 func TestNormalizeDirectAnthropicChannelModelsOnlyTouchesDirectAnthropic(t *testing.T) {
@@ -21,7 +32,7 @@ func TestNormalizeDirectAnthropicChannelModelsOnlyTouchesDirectAnthropic(t *test
 		Models: "claude-3-sonnet-20240229,claude-3-haiku-20240307",
 	}
 	require.True(t, NormalizeDirectAnthropicChannelModels(anthropic))
-	require.Equal(t, "claude-sonnet-4-6,claude-haiku-4-5-20251001,claude-sonnet-5", anthropic.Models)
+	require.Equal(t, "claude-sonnet-4-6,claude-haiku-4-5-20251001", anthropic.Models)
 
 	aws := &Channel{
 		Type:   constant.ChannelTypeAws,

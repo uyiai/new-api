@@ -68,20 +68,39 @@ func NormalizeDirectAnthropicModelList(models string) (string, bool) {
 		normalized = append(normalized, modelName)
 	}
 
-	for _, requiredModel := range requiredDirectAnthropicModels {
-		if _, ok := seen[requiredModel]; ok {
-			continue
-		}
-		seen[requiredModel] = struct{}{}
-		normalized = append(normalized, requiredModel)
-		changed = true
-	}
-
 	result := strings.Join(normalized, ",")
 	if result != strings.Trim(strings.TrimSpace(models), ",") {
 		changed = true
 	}
 	return result, changed
+}
+
+func EnsureRequiredDirectAnthropicModelList(models string) (string, bool) {
+	normalizedModels, changed := NormalizeDirectAnthropicModelList(models)
+	parts := strings.Split(normalizedModels, ",")
+	seen := make(map[string]struct{}, len(parts)+len(requiredDirectAnthropicModels))
+	ensured := make([]string, 0, len(parts)+len(requiredDirectAnthropicModels))
+	for _, part := range parts {
+		modelName := strings.TrimSpace(part)
+		if modelName == "" {
+			continue
+		}
+		if _, ok := seen[modelName]; ok {
+			changed = true
+			continue
+		}
+		seen[modelName] = struct{}{}
+		ensured = append(ensured, modelName)
+	}
+	for _, requiredModel := range requiredDirectAnthropicModels {
+		if _, ok := seen[requiredModel]; ok {
+			continue
+		}
+		seen[requiredModel] = struct{}{}
+		ensured = append(ensured, requiredModel)
+		changed = true
+	}
+	return strings.Join(ensured, ","), changed
 }
 
 func NormalizeDirectAnthropicChannelModels(channel *Channel) bool {
@@ -120,6 +139,42 @@ func NormalizeDirectAnthropicPreparationModels(preparation *ChannelPreparation) 
 	return changed
 }
 
+func ensureRequiredDirectAnthropicChannelModels(channel *Channel) bool {
+	if channel == nil || channel.Type != constant.ChannelTypeAnthropic {
+		return false
+	}
+	changed := false
+	if ensuredModels, modelsChanged := EnsureRequiredDirectAnthropicModelList(channel.Models); modelsChanged {
+		channel.Models = ensuredModels
+		changed = true
+	}
+	if channel.TestModel != nil {
+		if modelName, modelChanged := ReplaceRetiredDirectAnthropicModel(*channel.TestModel); modelChanged {
+			channel.TestModel = &modelName
+			changed = true
+		}
+	}
+	return changed
+}
+
+func ensureRequiredDirectAnthropicPreparationModels(preparation *ChannelPreparation) bool {
+	if preparation == nil || preparation.Type != constant.ChannelTypeAnthropic {
+		return false
+	}
+	changed := false
+	if ensuredModels, modelsChanged := EnsureRequiredDirectAnthropicModelList(preparation.Models); modelsChanged {
+		preparation.Models = ensuredModels
+		changed = true
+	}
+	if preparation.TestModel != nil {
+		if modelName, modelChanged := ReplaceRetiredDirectAnthropicModel(*preparation.TestModel); modelChanged {
+			preparation.TestModel = &modelName
+			changed = true
+		}
+	}
+	return changed
+}
+
 func NormalizeRetiredDirectAnthropicModelsInDatabase() error {
 	channelCount, err := normalizeRetiredDirectAnthropicChannelModelsInDatabase()
 	if err != nil {
@@ -147,7 +202,7 @@ func normalizeRetiredDirectAnthropicChannelModelsInDatabase() (int, error) {
 		if channel.TestModel != nil {
 			oldTestModel = *channel.TestModel
 		}
-		if !NormalizeDirectAnthropicChannelModels(&channel) {
+		if !ensureRequiredDirectAnthropicChannelModels(&channel) {
 			continue
 		}
 		updates := map[string]any{}
@@ -186,7 +241,7 @@ func normalizeRetiredDirectAnthropicPreparationModelsInDatabase() (int, error) {
 		if preparation.TestModel != nil {
 			oldTestModel = *preparation.TestModel
 		}
-		if !NormalizeDirectAnthropicPreparationModels(&preparation) {
+		if !ensureRequiredDirectAnthropicPreparationModels(&preparation) {
 			continue
 		}
 		updates := map[string]any{}
