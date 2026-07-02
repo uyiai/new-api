@@ -10,3 +10,7 @@ func TestModelListIncludesClaudeSonnet5(t *testing.T) {
 	require.Contains(t, ModelList, "claude-sonnet-5")
 	require.Equal(t, "claude-sonnet-5", ModelList[0])
 }
+
+func TestModelListIncludesClaudeFable5(t *testing.T) {
+	require.Contains(t, ModelList, "claude-fable-5")
+}

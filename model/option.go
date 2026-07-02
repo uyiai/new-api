@@ -206,10 +206,12 @@ func loadOptionsFromDatabase() {
 var requiredModelRatioBackfills = map[string]float64{
 	"claude-sonnet-4-6": 1.5,
 	"claude-sonnet-5":   1,
+	"claude-fable-5":    5,
 }
 
 var requiredCompletionRatioBackfills = map[string]float64{
 	"claude-sonnet-5": 5,
+	"claude-fable-5":  5,
 }
 
 func backfillRequiredModelRatioOptions() {

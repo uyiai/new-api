@@ -23,3 +23,17 @@ func TestDefaultCompletionRatioIncludesClaudeSonnet5(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, 5.0, ratio)
 }
+
+func TestDefaultRatiosIncludeClaudeFable5(t *testing.T) {
+	modelRatio, ok := defaultModelRatio["claude-fable-5"]
+	require.True(t, ok)
+	require.Equal(t, 5.0, modelRatio)
+
+	completionRatio, ok := defaultCompletionRatio["claude-fable-5"]
+	require.True(t, ok)
+	require.Equal(t, 5.0, completionRatio)
+
+	cacheRatio, ok := defaultCacheRatio["claude-fable-5"]
+	require.True(t, ok)
+	require.Equal(t, 0.1, cacheRatio)
+}

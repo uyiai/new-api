@@ -142,6 +142,7 @@ var defaultModelRatio = map[string]float64{
 	"claude-sonnet-4-5-20250929":                1.5,
 	"claude-sonnet-4-6":                         1.5,
 	"claude-sonnet-5":                           1,
+	"claude-fable-5":                            5,
 	"claude-opus-4-5-20251101":                  2.5,
 	"claude-opus-4-6":                           2.5,
 	"claude-opus-4-6-max":                       2.5,
@@ -345,6 +346,7 @@ var defaultCompletionRatio = map[string]float64{
 	"gpt-4o-gizmo-*":  3,
 	"gpt-4-all":       2,
 	"claude-sonnet-5": 5,
+	"claude-fable-5":  5,
 	"gpt-image-1":     8,
 }
 
