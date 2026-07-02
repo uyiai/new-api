@@ -57,6 +57,14 @@ Default action:
 No manual config is required. The script persists generated secrets in:
   ./data/docker-local/.env.generated
 
+Secret rotation policy:
+  SESSION_SECRET   Rotated on every deploy by default -> all logins invalidated.
+                   Pin with SESSION_SECRET=..., or keep with KEEP_SESSION_SECRET=1.
+  CRYPTO_SECRET    Kept stable (keys token/file HMAC cache lookups).
+  POSTGRES_PASSWORD / REDIS_PASSWORD
+                   Generated once and kept stable; do NOT rotate (bound to the
+                   initialized database volume / running cache container).
+
 Common environment overrides:
   PROJECT_NAME=new-api-local        Prefix for containers/network/volumes
   IMAGE_NAME=new-api:local          Docker image tag for the app
@@ -75,8 +83,10 @@ Common environment overrides:
 Advanced overrides:
   POSTGRES_PASSWORD=...             Override generated PostgreSQL password
   REDIS_PASSWORD=...                Override generated Redis password
-  SESSION_SECRET=...                Override generated session secret
-  CRYPTO_SECRET=...                 Override generated crypto secret
+  SESSION_SECRET=...                Pin a specific session secret (persisted, disables rotation)
+  KEEP_SESSION_SECRET=1             Keep the persisted session secret across deploys
+                                    (default: rotate every deploy -> logs everyone out)
+  CRYPTO_SECRET=...                 Override generated crypto secret (kept stable across deploys)
 
 Examples:
   bash bin/docker-local.sh
@@ -136,11 +146,29 @@ EOF
 }
 
 ensure_secrets() {
+  # Capture an explicit SESSION_SECRET override before the persisted
+  # secrets file is sourced, since load_secrets_file would clobber it.
+  local session_secret_override="${SESSION_SECRET:-}"
+
   load_secrets_file
   POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$(random_secret)}"
   REDIS_PASSWORD="${REDIS_PASSWORD:-$(random_secret)}"
-  SESSION_SECRET="${SESSION_SECRET:-$(random_secret)}"
+  # CRYPTO_SECRET must stay stable: it keys token/file HMAC cache lookups.
   CRYPTO_SECRET="${CRYPTO_SECRET:-$(random_secret)}"
+
+  if [[ -n "${session_secret_override}" ]]; then
+    # Explicit SESSION_SECRET wins and is persisted as-is.
+    SESSION_SECRET="${session_secret_override}"
+  elif [[ "${KEEP_SESSION_SECRET:-0}" == "1" ]]; then
+    # Opt out of rotation: keep the persisted value, generate if missing.
+    SESSION_SECRET="${SESSION_SECRET:-$(random_secret)}"
+  else
+    # Default: rotate the session secret on every deploy so all existing
+    # login cookies are invalidated and users must re-authenticate.
+    SESSION_SECRET="$(random_secret)"
+    log "Rotated SESSION_SECRET (all existing logins invalidated; set KEEP_SESSION_SECRET=1 to disable)"
+  fi
+
   save_secrets_file
 }
 
