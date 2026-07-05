@@ -94,15 +94,19 @@ export async function getCommonLogExportFields(
   return res.data
 }
 
-export async function exportCommonLogsXlsx(
+export type LogExportFormat = 'xlsx' | 'csv'
+
+export async function exportCommonLogs(
   params: GetLogsParams,
   fields: string[],
-  isAdmin: boolean
+  isAdmin: boolean,
+  format: LogExportFormat = 'xlsx'
 ): Promise<{ blob: Blob; filename: string }> {
   const path = isAdmin ? '/api/log/export' : '/api/log/self/export'
   const queryParams = buildQueryParams({
     ...params,
     fields: fields.join(','),
+    format,
   })
   queryParams.set('timezone', getBrowserTimezone())
   let res
@@ -134,7 +138,7 @@ export async function exportCommonLogsXlsx(
     blob,
     filename: getDownloadFilename(
       String(res.headers['content-disposition'] || ''),
-      'usage-logs.xlsx'
+      `usage-logs.${format}`
     ),
   }
 }

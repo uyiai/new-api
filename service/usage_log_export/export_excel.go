@@ -202,6 +202,11 @@ func BuildXLSX(ctx context.Context, input ExportInput) (*excelize.File, string, 
 	if err != nil {
 		return nil, "", total, err
 	}
+	// XLSX 需整包生成（zip），大数据量会占用大量内存/临时盘与时间，超限直接拒绝
+	// 并引导用户改用可流式的 CSV 导出。DataExportMaxRows=0 时不限制。
+	if common.DataExportMaxRows > 0 && total > int64(common.DataExportMaxRows) {
+		return nil, "", total, fmt.Errorf("导出行数 %d 超过 XLSX 导出上限 %d 行，请改用 CSV 导出（可流式下载，不受行数限制）", total, common.DataExportMaxRows)
+	}
 	select {
 	case <-ctx.Done():
 		return nil, "", total, ctx.Err()

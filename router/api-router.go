@@ -14,7 +14,9 @@ import (
 func SetApiRouter(router *gin.Engine) {
 	apiRouter := router.Group("/api")
 	apiRouter.Use(middleware.RouteTag("api"))
-	apiRouter.Use(gzip.Gzip(gzip.DefaultCompression))
+	// 日志导出走流式响应，需自行控制分块 flush（CSV 内部自己做 gzip，
+	// XLSX 本身已是 zip）；交给全局 gzip 中间件会因 flush 不到 deflate 缓冲而破坏流式。
+	apiRouter.Use(gzip.Gzip(gzip.DefaultCompression, gzip.WithExcludedPaths([]string{"/api/log/export", "/api/log/self/export"})))
 	apiRouter.Use(middleware.BodyStorageCleanup()) // 清理请求体存储
 	apiRouter.Use(middleware.GlobalAPIRateLimit())
 	anonymousRequestBodyLimit := middleware.AnonymousRequestBodyLimit()

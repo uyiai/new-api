@@ -18,7 +18,14 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Modal, Button, Checkbox, Spin, Typography } from '@douyinfe/semi-ui';
+import {
+  Modal,
+  Button,
+  Checkbox,
+  Spin,
+  Typography,
+  Tooltip,
+} from '@douyinfe/semi-ui';
 import { IconDownload } from '@douyinfe/semi-icons';
 import { API, showError, showSuccess } from '../../../../helpers';
 
@@ -107,7 +114,9 @@ const UsageLogExportModal = ({
   const [loadingFields, setLoadingFields] = useState(false);
   const [groups, setGroups] = useState([]);
   const [selectedFields, setSelectedFields] = useState(() => new Set());
-  const [exporting, setExporting] = useState(false);
+  // 记录正在导出的格式（null | 'xlsx' | 'csv'），以便只在被点击的按钮上显示 loading。
+  const [exportingFormat, setExportingFormat] = useState(null);
+  const exporting = exportingFormat !== null;
 
   const allFields = useMemo(
     () => groups.flatMap((group) => group.fields || []),
@@ -202,12 +211,12 @@ const UsageLogExportModal = ({
     setSelectedFields(new Set());
   };
 
-  const handleExport = async () => {
+  const handleExport = async (format = 'xlsx') => {
     if (selectedKeys.length === 0) {
       showError(t('请至少选择一个导出字段'));
       return;
     }
-    setExporting(true);
+    setExportingFormat(format);
     try {
       const formValues = getFormValues ? getFormValues() : {};
       const params = new URLSearchParams();
@@ -234,6 +243,8 @@ const UsageLogExportModal = ({
           params.set('channel', String(formValues.channel));
       }
       params.set('fields', selectedKeys.join(','));
+      // CSV 走后端流式导出（边查边写边 flush + gzip），避免大数据量时网关读超时。
+      params.set('format', format);
       const timezone = getBrowserTimezone();
       if (timezone) params.set('timezone', timezone);
 
@@ -259,7 +270,7 @@ const UsageLogExportModal = ({
 
       const filename = parseFilename(
         res.headers?.['content-disposition'] || '',
-        'usage-logs.xlsx',
+        `usage-logs.${format}`,
       );
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -280,7 +291,7 @@ const UsageLogExportModal = ({
         showError(error);
       }
     } finally {
-      setExporting(false);
+      setExportingFormat(null);
     }
   };
 
@@ -299,13 +310,23 @@ const UsageLogExportModal = ({
           >
             {t('取消')}
           </Button>
+          <Tooltip content={t('流式导出，大数据量推荐')}>
+            <Button
+              icon={<IconDownload />}
+              loading={exportingFormat === 'csv'}
+              disabled={loadingFields || selectedKeys.length === 0 || exporting}
+              onClick={() => handleExport('csv')}
+            >
+              {t('导出 CSV')}
+            </Button>
+          </Tooltip>
           <Button
             theme='solid'
             type='primary'
             icon={<IconDownload />}
-            loading={exporting}
-            disabled={loadingFields || selectedKeys.length === 0}
-            onClick={handleExport}
+            loading={exportingFormat === 'xlsx'}
+            disabled={loadingFields || selectedKeys.length === 0 || exporting}
+            onClick={() => handleExport('xlsx')}
           >
             {t('导出 Excel')}
           </Button>

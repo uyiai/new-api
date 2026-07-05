@@ -33,7 +33,11 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-import { exportCommonLogsXlsx, getCommonLogExportFields } from '../../api'
+import {
+  exportCommonLogs,
+  getCommonLogExportFields,
+  type LogExportFormat,
+} from '../../api'
 import type { GetLogsParams, LogExportFieldGroup } from '../../types'
 
 interface CommonLogsExportDialogProps {
@@ -88,8 +92,13 @@ export function CommonLogsExportDialog(props: CommonLogsExportDialogProps) {
   )
 
   const exportMutation = useMutation({
-    mutationFn: async () =>
-      exportCommonLogsXlsx(props.params, selectedFieldKeys, props.isAdmin),
+    mutationFn: async (format: LogExportFormat) =>
+      exportCommonLogs(
+        props.params,
+        selectedFieldKeys,
+        props.isAdmin,
+        format
+      ),
     onSuccess: ({ blob, filename }) => {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -256,7 +265,17 @@ export function CommonLogsExportDialog(props: CommonLogsExportDialogProps) {
           </DialogClose>
           <Button
             type='button'
-            onClick={() => exportMutation.mutate()}
+            variant='outline'
+            onClick={() => exportMutation.mutate('csv')}
+            disabled={!canExport}
+            title={t('Streamed export, recommended for large datasets')}
+          >
+            {isExporting && <Loader2 className='size-4 animate-spin' />}
+            {t('Export CSV')}
+          </Button>
+          <Button
+            type='button'
+            onClick={() => exportMutation.mutate('xlsx')}
             disabled={!canExport}
           >
             {isExporting && <Loader2 className='size-4 animate-spin' />}

@@ -3853,6 +3853,8 @@
     "导出使用日志": "Export Usage Logs",
     "选择需要导出到 Excel 的字段": "Select the fields to include in the Excel export.",
     "导出 Excel": "Export Excel",
+    "导出 CSV": "Export CSV",
+    "流式导出，大数据量推荐": "Streamed export, recommended for large datasets",
     "已选择 {{num}} 个字段": "{{num}} fields selected",
     "选择本组": "Select section",
     "加载导出字段失败": "Failed to load export fields",

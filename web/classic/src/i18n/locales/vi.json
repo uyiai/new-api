@@ -4241,6 +4241,8 @@
     "导出使用日志": "Xuất nhật ký sử dụng",
     "选择需要导出到 Excel 的字段": "Chọn các trường cần đưa vào tệp Excel xuất ra.",
     "导出 Excel": "Xuất Excel",
+    "导出 CSV": "Xuất CSV",
+    "流式导出，大数据量推荐": "Xuất theo luồng, khuyến nghị cho dữ liệu lớn",
     "已选择 {{num}} 个字段": "Đã chọn {{num}} trường",
     "选择本组": "Chọn nhóm này",
     "加载导出字段失败": "Không tải được các trường xuất",

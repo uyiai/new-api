@@ -68,6 +68,9 @@ var TaskEnabled = true
 var DataExportEnabled = true
 var DataExportInterval = 5         // unit: minute
 var DataExportDefaultTime = "hour" // unit: minute
+// DataExportMaxRows 限制 XLSX 导出的最大行数（XLSX 需整包生成，大数据量会占用大量内存/临时盘与时间）。
+// 超过后建议改用可流式的 CSV 导出。0 表示不限制。
+var DataExportMaxRows = 200000
 var DefaultCollapseSidebar = false // default value of collapse sidebar
 
 // Any options with "Secret", "Token" in its key won't be return by GetOptions
@@ -158,14 +161,18 @@ var RetryTimes = 0
 // instead of hammering a saturated one. The channel is NOT disabled and resumes
 // automatically — cooldown paces speed, never reduces total extraction.
 var ChannelCooldownEnabled = true
+
 // ChannelCooldownProactiveEnabled also cools a channel on a successful response
 // whose rate bucket is nearly empty, to avoid the next 429 before it happens.
 var ChannelCooldownProactiveEnabled = true
+
 // ChannelCooldownMaxSeconds caps any single cooldown as a safety bound (0 = no cap).
 var ChannelCooldownMaxSeconds = 120
+
 // ChannelCooldownMinRequestsRemaining triggers a proactive cooldown when the
 // requests-remaining bucket is at or below this value (<0 disables this check).
 var ChannelCooldownMinRequestsRemaining = 1
+
 // ChannelCooldownMinInputTokensRemaining triggers a proactive cooldown when the
 // input-tokens-remaining bucket is at or below this value (0 disables this check).
 var ChannelCooldownMinInputTokensRemaining = 0

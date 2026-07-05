@@ -3707,6 +3707,8 @@
     "导出使用日志": "Exporter les journaux d'utilisation",
     "选择需要导出到 Excel 的字段": "Sélectionnez les champs à inclure dans l'export Excel.",
     "导出 Excel": "Exporter Excel",
+    "导出 CSV": "Exporter CSV",
+    "流式导出，大数据量推荐": "Export en flux, recommandé pour les grands volumes",
     "已选择 {{num}} 个字段": "{{num}} champs sélectionnés",
     "选择本组": "Sélectionner la section",
     "加载导出字段失败": "Échec du chargement des champs d'export",
