@@ -110,16 +110,19 @@ func TestGetChannelTagMetadataByIdsChunksLargeLookups(t *testing.T) {
 	require.Len(t, metadata, channelCount)
 	require.Contains(t, metadata, 1)
 	require.Contains(t, metadata, channelCount)
+	require.Equal(t, "channel-1", metadata[1].Name)
 }
 
 func TestGetChannelTagStatsAggregatesUntaggedConsumeOnlyAndSkipsMissingChannels(t *testing.T) {
 	setupChannelTagStatsTestDB(t)
 
 	channels := []Channel{
-		{Id: 1, Type: 1, Key: "key-1", Name: "nil tag"},
-		{Id: 2, Type: 1, Key: "key-2", Name: "empty tag", Tag: channelTagStatsStringPtr("")},
-		{Id: 3, Type: 1, Key: "key-3", Name: "space tag", Tag: channelTagStatsStringPtr("  ")},
-		{Id: 4, Type: 1, Key: "key-4", Name: "alpha tag", Tag: channelTagStatsStringPtr(" alpha ")},
+		{Id: 1, Type: 1, Key: "key-1", Name: "nil tag", Status: common.ChannelStatusEnabled},
+		{Id: 2, Type: 1, Key: "key-2", Name: "empty tag", Status: common.ChannelStatusEnabled, Tag: channelTagStatsStringPtr("")},
+		{Id: 3, Type: 1, Key: "key-3", Name: "space tag", Status: common.ChannelStatusEnabled, Tag: channelTagStatsStringPtr("  ")},
+		{Id: 4, Type: 1, Key: "key-4", Name: "alpha tag", Status: common.ChannelStatusEnabled, Tag: channelTagStatsStringPtr(" alpha ")},
+		{Id: 5, Type: 1, Key: "key-5", Name: "beta tag no logs", Status: common.ChannelStatusEnabled, Tag: channelTagStatsStringPtr("beta")},
+		{Id: 6, Type: 1, Key: "key-6", Name: "untagged no logs", Status: common.ChannelStatusManuallyDisabled},
 	}
 	require.NoError(t, DB.Create(&channels).Error)
 
@@ -143,9 +146,9 @@ func TestGetChannelTagStatsAggregatesUntaggedConsumeOnlyAndSkipsMissingChannels(
 	require.Equal(t, int64(10), result.Summary.CompletionTokens)
 	require.Equal(t, int64(110), result.Summary.Tokens)
 	require.InDelta(t, 25, result.Summary.AverageUseTime, 0.0001)
-	require.Equal(t, 1, result.Summary.TagCount)
-	require.Equal(t, 2, result.Summary.TagGroupCount)
-	require.Equal(t, 4, result.Summary.ChannelCount)
+	require.Equal(t, 2, result.Summary.TagCount)
+	require.Equal(t, 3, result.Summary.TagGroupCount)
+	require.Equal(t, 6, result.Summary.ChannelCount)
 	require.Equal(t, int64(600), result.Summary.UntaggedQuota)
 	require.Equal(t, int64(3), result.Summary.UntaggedRequestCount)
 
@@ -153,14 +156,37 @@ func TestGetChannelTagStatsAggregatesUntaggedConsumeOnlyAndSkipsMissingChannels(
 	require.Equal(t, UntaggedChannelTagName, untagged.TagName)
 	require.Equal(t, int64(600), untagged.Quota)
 	require.Equal(t, int64(3), untagged.RequestCount)
-	require.Equal(t, 3, untagged.ChannelCount)
+	require.Equal(t, 4, untagged.ChannelCount)
 	require.Equal(t, int64(1002), untagged.LastLogAt)
+	require.Len(t, untagged.Channels, 4)
+	require.Equal(t, 3, untagged.Channels[0].ChannelId)
+	require.Equal(t, "space tag", untagged.Channels[0].ChannelName)
+	require.Equal(t, int64(300), untagged.Channels[0].Quota)
+	require.Equal(t, int64(1), untagged.Channels[0].RequestCount)
+	untaggedNoLogs := untagged.Channels[3]
+	require.Equal(t, 6, untaggedNoLogs.ChannelId)
+	require.Equal(t, "untagged no logs", untaggedNoLogs.ChannelName)
+	require.Equal(t, common.ChannelStatusManuallyDisabled, untaggedNoLogs.ChannelStatus)
+	require.Equal(t, int64(0), untaggedNoLogs.RequestCount)
 
 	alpha := requireChannelTagStatsItem(t, result.Items, "alpha")
 	require.Equal(t, "alpha", alpha.TagName)
 	require.Equal(t, int64(400), alpha.Quota)
 	require.Equal(t, int64(1), alpha.RequestCount)
 	require.Equal(t, 1, alpha.ChannelCount)
+	require.Len(t, alpha.Channels, 1)
+	require.Equal(t, 4, alpha.Channels[0].ChannelId)
+	require.Equal(t, "alpha tag", alpha.Channels[0].ChannelName)
+	require.Equal(t, common.ChannelStatusEnabled, alpha.Channels[0].ChannelStatus)
+	require.InDelta(t, 40, alpha.Channels[0].AverageUseTime, 0.0001)
+
+	beta := requireChannelTagStatsItem(t, result.Items, "beta")
+	require.Equal(t, int64(0), beta.Quota)
+	require.Equal(t, int64(0), beta.RequestCount)
+	require.Equal(t, 1, beta.ChannelCount)
+	require.Len(t, beta.Channels, 1)
+	require.Equal(t, 5, beta.Channels[0].ChannelId)
+	require.Equal(t, "beta tag no logs", beta.Channels[0].ChannelName)
 }
 
 func TestGetChannelTagStatsAppliesInclusiveDateBounds(t *testing.T) {

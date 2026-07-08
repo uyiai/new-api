@@ -154,8 +154,11 @@ const (
 )
 
 type ChannelTagMetadata struct {
-	Id  int     `gorm:"column:id"`
-	Tag *string `gorm:"column:tag"`
+	Id     int     `gorm:"column:id"`
+	Name   string  `gorm:"column:name"`
+	Type   int     `gorm:"column:type"`
+	Status int     `gorm:"column:status"`
+	Tag    *string `gorm:"column:tag"`
 }
 
 func NormalizeChannelTag(tag *string) (key string, name string) {
@@ -198,7 +201,7 @@ func GetChannelTagMetadataByIds(ids []int) (map[int]ChannelTagMetadata, error) {
 		}
 
 		var metadata []ChannelTagMetadata
-		if err := DB.Model(&Channel{}).Select("id, tag").Where("id IN ?", uniqueIDs[start:end]).Find(&metadata).Error; err != nil {
+		if err := DB.Model(&Channel{}).Select("id, name, type, status, tag").Where("id IN ?", uniqueIDs[start:end]).Find(&metadata).Error; err != nil {
 			return nil, err
 		}
 		for _, item := range metadata {
@@ -206,6 +209,14 @@ func GetChannelTagMetadataByIds(ids []int) (map[int]ChannelTagMetadata, error) {
 		}
 	}
 	return metadataByID, nil
+}
+
+func GetAllChannelTagMetadata() ([]ChannelTagMetadata, error) {
+	var metadata []ChannelTagMetadata
+	if err := DB.Model(&Channel{}).Select("id, name, type, status, tag").Find(&metadata).Error; err != nil {
+		return nil, err
+	}
+	return metadata, nil
 }
 
 func channelGroupFilterCondition() string {

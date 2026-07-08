@@ -102,15 +102,30 @@ type ChannelTagStatsSummary struct {
 }
 
 type ChannelTagStatsItem struct {
-	TagKey           string  `json:"tag_key"`
-	TagName          string  `json:"tag_name"`
+	TagKey           string                       `json:"tag_key"`
+	TagName          string                       `json:"tag_name"`
+	Quota            int64                        `json:"quota"`
+	RequestCount     int64                        `json:"request_count"`
+	PromptTokens     int64                        `json:"prompt_tokens"`
+	CompletionTokens int64                        `json:"completion_tokens"`
+	Tokens           int64                        `json:"tokens"`
+	AverageUseTime   float64                      `json:"average_use_time"`
+	ChannelCount     int                          `json:"channel_count"`
+	LastLogAt        int64                        `json:"last_log_at"`
+	Channels         []ChannelTagStatsChannelItem `json:"channels"`
+}
+
+type ChannelTagStatsChannelItem struct {
+	ChannelId        int     `json:"channel_id"`
+	ChannelName      string  `json:"channel_name"`
+	ChannelType      int     `json:"channel_type"`
+	ChannelStatus    int     `json:"channel_status"`
 	Quota            int64   `json:"quota"`
 	RequestCount     int64   `json:"request_count"`
 	PromptTokens     int64   `json:"prompt_tokens"`
 	CompletionTokens int64   `json:"completion_tokens"`
 	Tokens           int64   `json:"tokens"`
 	AverageUseTime   float64 `json:"average_use_time"`
-	ChannelCount     int     `json:"channel_count"`
 	LastLogAt        int64   `json:"last_log_at"`
 }
 
@@ -173,9 +188,10 @@ type channelTagTrendAggregate struct {
 }
 
 type channelTagAccumulator struct {
-	item       ChannelTagStatsItem
-	useTimeSum int64
-	channels   map[int]struct{}
+	item              ChannelTagStatsItem
+	useTimeSum        int64
+	channels          map[int]*ChannelTagStatsChannelItem
+	channelUseTimeSum map[int]int64
 }
 
 func applyChannelTagStatsLogFilter(tx *gorm.DB, filter ChannelTagStatsFilter) *gorm.DB {
@@ -211,8 +227,8 @@ func channelTagStatsBucketExpression(granularity ChannelTagStatsGranularity) str
 	return fmt.Sprintf("(logs.created_at / %d) * %d", bucketSize, bucketSize)
 }
 
-func channelTagStatsMetadata(channelIDs []int) (map[int]ChannelTagMetadata, error) {
-	return GetChannelTagMetadataByIds(channelIDs)
+func channelTagStatsAllMetadata() ([]ChannelTagMetadata, error) {
+	return GetAllChannelTagMetadata()
 }
 
 func addChannelTagStatsTotals(acc *channelTagAccumulator, requestCount int64, quota int64, promptTokens int64, completionTokens int64, useTimeSum int64, lastLogAt int64) {
@@ -227,13 +243,85 @@ func addChannelTagStatsTotals(acc *channelTagAccumulator, requestCount int64, qu
 	}
 }
 
+func ensureChannelTagStatsAccumulator(accumulators map[string]*channelTagAccumulator, key string, name string) *channelTagAccumulator {
+	acc, ok := accumulators[key]
+	if ok {
+		return acc
+	}
+	acc = &channelTagAccumulator{
+		item: ChannelTagStatsItem{
+			TagKey:  key,
+			TagName: name,
+		},
+		channels:          make(map[int]*ChannelTagStatsChannelItem),
+		channelUseTimeSum: make(map[int]int64),
+	}
+	accumulators[key] = acc
+	return acc
+}
+
+func ensureChannelTagStatsChannel(acc *channelTagAccumulator, metadata ChannelTagMetadata) *ChannelTagStatsChannelItem {
+	channel, ok := acc.channels[metadata.Id]
+	if ok {
+		return channel
+	}
+	channel = &ChannelTagStatsChannelItem{
+		ChannelId:     metadata.Id,
+		ChannelName:   metadata.Name,
+		ChannelType:   metadata.Type,
+		ChannelStatus: metadata.Status,
+	}
+	acc.channels[metadata.Id] = channel
+	return channel
+}
+
+func addChannelTagStatsChannelTotals(acc *channelTagAccumulator, metadata ChannelTagMetadata, row channelTagChannelAggregate) {
+	channel := ensureChannelTagStatsChannel(acc, metadata)
+	channel.RequestCount += row.RequestCount
+	channel.Quota += row.Quota
+	channel.PromptTokens += row.PromptTokens
+	channel.CompletionTokens += row.CompletionTokens
+	channel.Tokens += row.PromptTokens + row.CompletionTokens
+	acc.channelUseTimeSum[row.ChannelId] += row.UseTimeSum
+	if row.LastLogAt > channel.LastLogAt {
+		channel.LastLogAt = row.LastLogAt
+	}
+}
+
+func sortedChannelTagStatsChannels(acc *channelTagAccumulator) []ChannelTagStatsChannelItem {
+	channels := make([]ChannelTagStatsChannelItem, 0, len(acc.channels))
+	for channelID, channel := range acc.channels {
+		if channel.RequestCount > 0 {
+			channel.AverageUseTime = float64(acc.channelUseTimeSum[channelID]) / float64(channel.RequestCount)
+		}
+		channels = append(channels, *channel)
+	}
+	sort.SliceStable(channels, func(i, j int) bool {
+		if channels[i].Quota != channels[j].Quota {
+			return channels[i].Quota > channels[j].Quota
+		}
+		if channels[i].RequestCount != channels[j].RequestCount {
+			return channels[i].RequestCount > channels[j].RequestCount
+		}
+		if channels[i].LastLogAt != channels[j].LastLogAt {
+			return channels[i].LastLogAt > channels[j].LastLogAt
+		}
+		if channels[i].ChannelName != channels[j].ChannelName {
+			return channels[i].ChannelName < channels[j].ChannelName
+		}
+		return channels[i].ChannelId < channels[j].ChannelId
+	})
+	return channels
+}
+
 func sortedChannelTagStatsItems(accumulators map[string]*channelTagAccumulator) []ChannelTagStatsItem {
 	items := make([]ChannelTagStatsItem, 0, len(accumulators))
 	for _, acc := range accumulators {
 		if acc.item.RequestCount > 0 {
 			acc.item.AverageUseTime = float64(acc.useTimeSum) / float64(acc.item.RequestCount)
 		}
-		acc.item.ChannelCount = len(acc.channels)
+		acc.item.Channels = sortedChannelTagStatsChannels(acc)
+		acc.item.ChannelCount = len(acc.item.Channels)
 		items = append(items, acc.item)
 	}
 	sort.SliceStable(items, func(i, j int) bool {
@@ -268,6 +356,15 @@ func channelTagForChannelID(channelID int, metadataByID map[int]ChannelTagMetada
 	return key, name, true
 }
 
+func channelTagMetadataForChannelID(channelID int, metadataByID map[int]ChannelTagMetadata) (ChannelTagMetadata, string, string, bool) {
+	metadata, ok := metadataByID[channelID]
+	if !ok {
+		return ChannelTagMetadata{}, "", "", false
+	}
+	key, name := NormalizeChannelTag(metadata.Tag)
+	return metadata, key, name, true
+}
+
 func GetChannelTagStats(ctx context.Context, filter ChannelTagStatsFilter) (*ChannelTagStatsResult, error) {
 	var err error
 	filter, err = NormalizeChannelTagStatsFilter(filter)
@@ -289,38 +386,33 @@ func GetChannelTagStats(ctx context.Context, filter ChannelTagStatsFilter) (*Cha
 		return nil, err
 	}
 
-	channelIDs := make([]int, 0, len(channelRows))
-	for _, row := range channelRows {
-		if row.ChannelId > 0 {
-			channelIDs = append(channelIDs, row.ChannelId)
-		}
-	}
-	metadataByID, err := channelTagStatsMetadata(channelIDs)
+	allMetadata, err := channelTagStatsAllMetadata()
 	if err != nil {
 		return nil, err
 	}
 
+	metadataByID := make(map[int]ChannelTagMetadata, len(allMetadata))
 	accumulators := make(map[string]*channelTagAccumulator)
+	for _, metadata := range allMetadata {
+		if metadata.Id <= 0 {
+			continue
+		}
+		metadataByID[metadata.Id] = metadata
+		key, name := NormalizeChannelTag(metadata.Tag)
+		acc := ensureChannelTagStatsAccumulator(accumulators, key, name)
+		ensureChannelTagStatsChannel(acc, metadata)
+	}
+
 	summaryUseTimeSum := int64(0)
 	for _, row := range channelRows {
-		key, name, exists := channelTagForChannelID(row.ChannelId, metadataByID)
+		metadata, key, name, exists := channelTagMetadataForChannelID(row.ChannelId, metadataByID)
 		if !exists {
 			continue
 		}
-		acc, ok := accumulators[key]
-		if !ok {
-			acc = &channelTagAccumulator{
-				item: ChannelTagStatsItem{
-					TagKey:  key,
-					TagName: name,
-				},
-				channels: make(map[int]struct{}),
-			}
-			accumulators[key] = acc
-		}
+		acc := ensureChannelTagStatsAccumulator(accumulators, key, name)
 		addChannelTagStatsTotals(acc, row.RequestCount, row.Quota, row.PromptTokens, row.CompletionTokens, row.UseTimeSum, row.LastLogAt)
 		if row.ChannelId > 0 {
-			acc.channels[row.ChannelId] = struct{}{}
+			addChannelTagStatsChannelTotals(acc, metadata, row)
 		}
 		summaryUseTimeSum += row.UseTimeSum
 	}

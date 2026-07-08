@@ -204,6 +204,21 @@ export interface ChannelTagStatsItem {
   average_use_time: number
   channel_count: number
   last_log_at: number
+  channels: ChannelTagStatsChannelItem[]
+}
+
+export interface ChannelTagStatsChannelItem {
+  channel_id: number
+  channel_name: string
+  channel_type: number
+  channel_status: number
+  quota: number
+  request_count: number
+  prompt_tokens: number
+  completion_tokens: number
+  tokens: number
+  average_use_time: number
+  last_log_at: number
 }
 
 export interface ChannelTagStatsTrendPoint {

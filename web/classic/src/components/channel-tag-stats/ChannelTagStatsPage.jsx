@@ -107,6 +107,31 @@ const getTagName = (item) => item?.tag_name || '未设置标签';
 
 const getMetricValue = (item, metric) => normalizeNumber(item?.[metric]);
 
+const normalizeSearchText = (value) => String(value || '').trim().toLowerCase();
+
+const tagMatchesKeyword = (item, keyword) =>
+  `${item?.tag_name || ''} ${item?.tag_key || ''}`
+    .toLowerCase()
+    .includes(keyword);
+
+const channelMatchesKeyword = (channel, keyword) =>
+  `${channel?.channel_id || ''} ${channel?.channel_name || ''}`
+    .toLowerCase()
+    .includes(keyword);
+
+const getDisplayChannels = (item) =>
+  Array.isArray(item?.filtered_channels)
+    ? item.filtered_channels
+    : Array.isArray(item?.channels)
+      ? item.channels
+      : [];
+
+const getChannelStatusText = (status, t) => {
+  if (status === 1) return t('已启用');
+  if (status === 2) return t('自动禁用');
+  return t('已禁用');
+};
+
 const getTopItems = (items, metric) =>
   [...items]
     .filter((item) => getMetricValue(item, metric) > 0)
@@ -391,11 +416,27 @@ const ChannelTagStatsPage = () => {
   const totalQuota = normalizeNumber(summary.total_quota);
 
   const filteredItems = useMemo(() => {
-    const text = keyword.trim().toLowerCase();
-    if (!text) return items;
-    return items.filter((item) =>
-      `${item.tag_name || ''} ${item.tag_key || ''}`.toLowerCase().includes(text),
-    );
+    const text = normalizeSearchText(keyword);
+    if (!text) {
+      return items.map((item) => ({
+        ...item,
+        filtered_channels: Array.isArray(item.channels) ? item.channels : [],
+      }));
+    }
+    return items.reduce((acc, item) => {
+      const channels = Array.isArray(item.channels) ? item.channels : [];
+      if (tagMatchesKeyword(item, text)) {
+        acc.push({ ...item, filtered_channels: channels });
+        return acc;
+      }
+      const matchedChannels = channels.filter((channel) =>
+        channelMatchesKeyword(channel, text),
+      );
+      if (matchedChannels.length > 0) {
+        acc.push({ ...item, filtered_channels: matchedChannels });
+      }
+      return acc;
+    }, []);
   }, [items, keyword]);
 
   const pieSpec = useMemo(() => buildTagQuotaPieSpec(filteredItems, t), [filteredItems, t]);
@@ -406,6 +447,75 @@ const ChannelTagStatsPage = () => {
   const trendSpec = useMemo(
     () => buildTagTrendSpec(trend, stats?.granularity || granularity, metric, t),
     [granularity, metric, stats?.granularity, trend, t],
+  );
+
+  const channelColumns = useMemo(
+    () => [
+      {
+        title: t('渠道 ID'),
+        dataIndex: 'channel_id',
+        width: 110,
+        render: (value) => <Text code>#{value}</Text>,
+        sorter: (a, b) => normalizeNumber(a.channel_id) - normalizeNumber(b.channel_id),
+      },
+      {
+        title: t('渠道名称'),
+        dataIndex: 'channel_name',
+        width: 220,
+        render: (value) => value || '-',
+        sorter: (a, b) =>
+          String(a.channel_name || '').localeCompare(String(b.channel_name || '')),
+      },
+      {
+        title: t('状态'),
+        dataIndex: 'channel_status',
+        width: 110,
+        render: (value) => (
+          <Tag color={value === 1 ? 'green' : 'grey'}>{getChannelStatusText(value, t)}</Tag>
+        ),
+      },
+      {
+        title: t('额度'),
+        dataIndex: 'quota',
+        width: 140,
+        align: 'right',
+        render: (value) => renderQuota(normalizeNumber(value), 2),
+        sorter: (a, b) => normalizeNumber(a.quota) - normalizeNumber(b.quota),
+      },
+      {
+        title: t('请求数'),
+        dataIndex: 'request_count',
+        width: 120,
+        align: 'right',
+        render: formatInteger,
+        sorter: (a, b) => normalizeNumber(a.request_count) - normalizeNumber(b.request_count),
+      },
+      {
+        title: t('Token 数'),
+        dataIndex: 'tokens',
+        width: 140,
+        align: 'right',
+        render: formatInteger,
+        sorter: (a, b) => normalizeNumber(a.tokens) - normalizeNumber(b.tokens),
+      },
+      {
+        title: t('平均耗时'),
+        dataIndex: 'average_use_time',
+        width: 120,
+        align: 'right',
+        render: formatUseTimeSeconds,
+        sorter: (a, b) =>
+          normalizeNumber(a.average_use_time) - normalizeNumber(b.average_use_time),
+      },
+      {
+        title: t('最后日志'),
+        dataIndex: 'last_log_at',
+        width: 170,
+        render: formatLastLogTime,
+        sorter: (a, b) => normalizeNumber(a.last_log_at) - normalizeNumber(b.last_log_at),
+      },
+    ],
+    [t],
   );
 
   const tableColumns = useMemo(
@@ -484,8 +594,8 @@ const ChannelTagStatsPage = () => {
         dataIndex: 'channel_count',
         width: 110,
         align: 'right',
-        render: formatInteger,
-        sorter: (a, b) => normalizeNumber(a.channel_count) - normalizeNumber(b.channel_count),
+        render: (_, record) => formatInteger(getDisplayChannels(record).length),
+        sorter: (a, b) => getDisplayChannels(a).length - getDisplayChannels(b).length,
       },
       {
         title: t('最后日志'),
@@ -505,6 +615,29 @@ const ChannelTagStatsPage = () => {
       ))}
     </Tabs>
   );
+
+  const expandedRowRender = (record) => {
+    const channels = getDisplayChannels(record);
+    if (channels.length === 0) {
+      return <Empty description={t('没有匹配的渠道')} />;
+    }
+    return (
+      <div className='rounded-lg bg-semi-color-fill-0 p-3'>
+        <div className='mb-2 text-xs text-semi-color-text-2'>
+          {t('标签下渠道')} · {formatInteger(channels.length)}
+        </div>
+        <Table
+          columns={channelColumns}
+          dataSource={channels}
+          rowKey={(channel) => channel.channel_id}
+          pagination={false}
+          size='small'
+          scroll={{ x: 1200 }}
+          style={{ width: '100%' }}
+        />
+      </div>
+    );
+  };
 
   return (
     <div className='flex w-full max-w-none flex-col gap-4 overflow-x-auto'>
@@ -557,7 +690,7 @@ const ChannelTagStatsPage = () => {
             <Input
               size='small'
               prefix={<IconSearch />}
-              placeholder={t('筛选标签')}
+              placeholder={t('筛选标签或渠道')}
               value={keyword}
               onChange={setKeyword}
               showClear
@@ -687,6 +820,9 @@ const ChannelTagStatsPage = () => {
           rowKey={(record) => record.tag_key || record.tag_name}
           loading={loading || fetching}
           pagination={{ pageSize: 10 }}
+          expandedRowRender={expandedRowRender}
+          rowExpandable={(record) => getDisplayChannels(record).length > 0}
+          expandRowByClick
           scroll={{ x: 1500 }}
           style={{ width: '100%' }}
           empty={<Empty description={t('所选范围暂无渠道标签统计')} />}

@@ -49,6 +49,36 @@ const CHANNEL_TAG_STATS_GRANULARITY_OPTIONS: Array<{
   { value: 'week', label: 'Weekly' },
 ]
 
+function filterTagItems<
+  T extends {
+    tag_name: string
+    tag_key: string
+    channels?: Array<{ channel_id: number; channel_name: string }>
+  },
+>(items: T[], filterValue?: string): T[] {
+  const needle = String(filterValue ?? '').trim().toLowerCase()
+  if (!needle) return items
+
+  return items.reduce<T[]>((acc, item) => {
+    const channels = item.channels ?? []
+    const tagMatched = `${item.tag_name} ${item.tag_key}`
+      .toLowerCase()
+      .includes(needle)
+    if (tagMatched) {
+      acc.push(item)
+      return acc
+    }
+
+    const matchedChannels = channels.filter((channel) =>
+      `${channel.channel_id} ${channel.channel_name}`.toLowerCase().includes(needle)
+    )
+    if (matchedChannels.length > 0) {
+      acc.push({ ...item, channels: matchedChannels } as T)
+    }
+    return acc
+  }, [])
+}
+
 function toDate(value?: number): Date | undefined {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
     return undefined
@@ -98,6 +128,10 @@ export function ChannelTagStats() {
   const items = data?.items ?? []
   const trend = data?.trend ?? []
   const summary = data?.summary
+  const filteredItems = useMemo(
+    () => filterTagItems(items, search.filter),
+    [items, search.filter]
+  )
 
   const updateRange = (range: { start?: Date; end?: Date }) => {
     navigate({
@@ -194,14 +228,14 @@ export function ChannelTagStats() {
           />
 
           <TagStatsCharts
-            items={items}
+            items={filteredItems}
             trend={trend}
             granularity={data?.granularity ?? granularity}
             loading={statsQuery.isLoading}
           />
 
           <TagStatsTable
-            items={items}
+            items={filteredItems}
             totalQuota={summary?.total_quota ?? 0}
             loading={statsQuery.isLoading}
             fetching={statsQuery.isFetching}
