@@ -58,6 +58,7 @@ const UserAgreement = lazy(() => import('./pages/UserAgreement'));
 const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
 const CostReport = lazy(() => import('./pages/CostReport'));
 const QueryKey = lazy(() => import('./pages/QueryKey'));
+const ChannelTagStats = lazy(() => import('./pages/ChannelTagStats'));
 
 function DynamicOAuth2Callback() {
   const { provider } = useParams();
@@ -147,6 +148,16 @@ function App() {
           element={
             <AdminRoute>
               <ChannelPreparation />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path='/console/channel-tag-stats'
+          element={
+            <AdminRoute>
+              <Suspense fallback={<Loading></Loading>} key={location.pathname}>
+                <ChannelTagStats />
+              </Suspense>
             </AdminRoute>
           }
         />

@@ -170,6 +170,66 @@ export interface CopyChannelResponse {
   }
 }
 
+export type ChannelTagStatsGranularity = 'hour' | 'day' | 'week'
+
+export interface ChannelTagStatsParams {
+  start_timestamp?: number
+  end_timestamp?: number
+  granularity?: ChannelTagStatsGranularity
+  trend_limit?: number
+}
+
+export interface ChannelTagStatsSummary {
+  total_quota: number
+  request_count: number
+  prompt_tokens: number
+  completion_tokens: number
+  tokens: number
+  average_use_time: number
+  tag_count: number
+  tag_group_count: number
+  channel_count: number
+  untagged_quota: number
+  untagged_request_count: number
+}
+
+export interface ChannelTagStatsItem {
+  tag_key: string
+  tag_name: string
+  quota: number
+  request_count: number
+  prompt_tokens: number
+  completion_tokens: number
+  tokens: number
+  average_use_time: number
+  channel_count: number
+  last_log_at: number
+}
+
+export interface ChannelTagStatsTrendPoint {
+  bucket_start: number
+  tag_key: string
+  tag_name: string
+  quota: number
+  request_count: number
+  prompt_tokens: number
+  completion_tokens: number
+  tokens: number
+}
+
+export interface ChannelTagStatsData {
+  summary: ChannelTagStatsSummary
+  items: ChannelTagStatsItem[]
+  trend: ChannelTagStatsTrendPoint[]
+  granularity: ChannelTagStatsGranularity
+}
+
+export interface ChannelTagStatsResponse {
+  success: boolean
+  message?: string
+  data?: ChannelTagStatsData
+}
+
 // ============================================================================
 // Multi-Key Management Types
 // ============================================================================

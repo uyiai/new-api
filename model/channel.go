@@ -147,6 +147,67 @@ func NormalizeChannelGroupFilter(group string) string {
 	return group
 }
 
+const (
+	UntaggedChannelTagKey             = "__untagged__"
+	UntaggedChannelTagName            = "未设置标签"
+	channelTagMetadataLookupChunkSize = 500
+)
+
+type ChannelTagMetadata struct {
+	Id  int     `gorm:"column:id"`
+	Tag *string `gorm:"column:tag"`
+}
+
+func NormalizeChannelTag(tag *string) (key string, name string) {
+	if tag == nil {
+		return UntaggedChannelTagKey, UntaggedChannelTagName
+	}
+	trimmed := strings.TrimSpace(*tag)
+	if trimmed == "" {
+		return UntaggedChannelTagKey, UntaggedChannelTagName
+	}
+	return trimmed, trimmed
+}
+
+func GetChannelTagMetadataByIds(ids []int) (map[int]ChannelTagMetadata, error) {
+	metadataByID := make(map[int]ChannelTagMetadata)
+	if len(ids) == 0 {
+		return metadataByID, nil
+	}
+
+	seen := make(map[int]struct{}, len(ids))
+	uniqueIDs := make([]int, 0, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		uniqueIDs = append(uniqueIDs, id)
+	}
+	if len(uniqueIDs) == 0 {
+		return metadataByID, nil
+	}
+
+	for start := 0; start < len(uniqueIDs); start += channelTagMetadataLookupChunkSize {
+		end := start + channelTagMetadataLookupChunkSize
+		if end > len(uniqueIDs) {
+			end = len(uniqueIDs)
+		}
+
+		var metadata []ChannelTagMetadata
+		if err := DB.Model(&Channel{}).Select("id, tag").Where("id IN ?", uniqueIDs[start:end]).Find(&metadata).Error; err != nil {
+			return nil, err
+		}
+		for _, item := range metadata {
+			metadataByID[item.Id] = item
+		}
+	}
+	return metadataByID, nil
+}
+
 func channelGroupFilterCondition() string {
 	if common.UsingMySQL {
 		return `CONCAT(',', ` + commonGroupCol + `, ',') LIKE ? ESCAPE '!'`

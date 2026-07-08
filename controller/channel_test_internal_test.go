@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -14,6 +15,23 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestGetChannelTagStatsRejectsInvalidGranularity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/channel/tag_stats?granularity=month", nil)
+
+	GetChannelTagStats(ctx)
+
+	var response struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.False(t, response.Success)
+	require.NotEmpty(t, response.Message)
+}
 
 func TestSettleTestQuotaUsesTieredBilling(t *testing.T) {
 	info := &relaycommon.RelayInfo{

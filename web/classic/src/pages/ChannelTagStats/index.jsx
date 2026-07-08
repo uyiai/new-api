@@ -1,5 +1,5 @@
 /*
-Copyright (C) 2023-2026 QuantumNous
+Copyright (C) 2025 QuantumNous
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU Affero General Public License as
@@ -16,12 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-// Re-export all library functions
-export * from './channel-actions'
-export * from './channel-tag-stats'
-export * from './channel-form-errors'
-export * from './channel-form'
-export * from './channel-type-config'
-export * from './channel-utils'
-export * from './multi-key-utils'
-export * from './model-mapping-validation'
+
+import React from 'react';
+import ChannelTagStatsPage from '../../components/channel-tag-stats/ChannelTagStatsPage';
+
+const ChannelTagStats = () => (
+  <div className='mt-[60px] w-full max-w-none px-0 md:px-2'>
+    <ChannelTagStatsPage />
+  </div>
+);
+
+export default ChannelTagStats;

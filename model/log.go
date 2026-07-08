@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -65,6 +66,351 @@ const (
 	LogTypeError   = 5
 	LogTypeRefund  = 6
 )
+
+type ChannelTagStatsGranularity string
+
+const (
+	ChannelTagStatsHour ChannelTagStatsGranularity = "hour"
+	ChannelTagStatsDay  ChannelTagStatsGranularity = "day"
+	ChannelTagStatsWeek ChannelTagStatsGranularity = "week"
+)
+
+const (
+	defaultChannelTagStatsTrendLimit = 12
+	maxChannelTagStatsTrendLimit     = 30
+)
+
+type ChannelTagStatsFilter struct {
+	StartTimestamp int64
+	EndTimestamp   int64
+	Granularity    ChannelTagStatsGranularity
+	TrendLimit     int
+}
+
+type ChannelTagStatsSummary struct {
+	TotalQuota           int64   `json:"total_quota"`
+	RequestCount         int64   `json:"request_count"`
+	PromptTokens         int64   `json:"prompt_tokens"`
+	CompletionTokens     int64   `json:"completion_tokens"`
+	Tokens               int64   `json:"tokens"`
+	AverageUseTime       float64 `json:"average_use_time"`
+	TagCount             int     `json:"tag_count"`
+	TagGroupCount        int     `json:"tag_group_count"`
+	ChannelCount         int     `json:"channel_count"`
+	UntaggedQuota        int64   `json:"untagged_quota"`
+	UntaggedRequestCount int64   `json:"untagged_request_count"`
+}
+
+type ChannelTagStatsItem struct {
+	TagKey           string  `json:"tag_key"`
+	TagName          string  `json:"tag_name"`
+	Quota            int64   `json:"quota"`
+	RequestCount     int64   `json:"request_count"`
+	PromptTokens     int64   `json:"prompt_tokens"`
+	CompletionTokens int64   `json:"completion_tokens"`
+	Tokens           int64   `json:"tokens"`
+	AverageUseTime   float64 `json:"average_use_time"`
+	ChannelCount     int     `json:"channel_count"`
+	LastLogAt        int64   `json:"last_log_at"`
+}
+
+type ChannelTagStatsTrendPoint struct {
+	BucketStart      int64  `json:"bucket_start"`
+	TagKey           string `json:"tag_key"`
+	TagName          string `json:"tag_name"`
+	Quota            int64  `json:"quota"`
+	RequestCount     int64  `json:"request_count"`
+	PromptTokens     int64  `json:"prompt_tokens"`
+	CompletionTokens int64  `json:"completion_tokens"`
+	Tokens           int64  `json:"tokens"`
+}
+
+type ChannelTagStatsResult struct {
+	Summary     ChannelTagStatsSummary      `json:"summary"`
+	Items       []ChannelTagStatsItem       `json:"items"`
+	Trend       []ChannelTagStatsTrendPoint `json:"trend"`
+	Granularity ChannelTagStatsGranularity  `json:"granularity"`
+}
+
+func NormalizeChannelTagStatsFilter(filter ChannelTagStatsFilter) (ChannelTagStatsFilter, error) {
+	if filter.StartTimestamp > 0 && filter.EndTimestamp > 0 && filter.StartTimestamp > filter.EndTimestamp {
+		return filter, errors.New("开始时间不能晚于结束时间")
+	}
+	if filter.Granularity == "" {
+		filter.Granularity = ChannelTagStatsDay
+	}
+	switch filter.Granularity {
+	case ChannelTagStatsHour, ChannelTagStatsDay, ChannelTagStatsWeek:
+	default:
+		return filter, errors.New("无效的统计粒度")
+	}
+	if filter.TrendLimit <= 0 {
+		filter.TrendLimit = defaultChannelTagStatsTrendLimit
+	}
+	if filter.TrendLimit > maxChannelTagStatsTrendLimit {
+		filter.TrendLimit = maxChannelTagStatsTrendLimit
+	}
+	return filter, nil
+}
+
+type channelTagChannelAggregate struct {
+	ChannelId        int   `gorm:"column:channel_id"`
+	RequestCount     int64 `gorm:"column:request_count"`
+	Quota            int64 `gorm:"column:quota"`
+	PromptTokens     int64 `gorm:"column:prompt_tokens"`
+	CompletionTokens int64 `gorm:"column:completion_tokens"`
+	UseTimeSum       int64 `gorm:"column:use_time_sum"`
+	LastLogAt        int64 `gorm:"column:last_log_at"`
+}
+
+type channelTagTrendAggregate struct {
+	BucketStart      int64 `gorm:"column:bucket_start"`
+	ChannelId        int   `gorm:"column:channel_id"`
+	RequestCount     int64 `gorm:"column:request_count"`
+	Quota            int64 `gorm:"column:quota"`
+	PromptTokens     int64 `gorm:"column:prompt_tokens"`
+	CompletionTokens int64 `gorm:"column:completion_tokens"`
+}
+
+type channelTagAccumulator struct {
+	item       ChannelTagStatsItem
+	useTimeSum int64
+	channels   map[int]struct{}
+}
+
+func applyChannelTagStatsLogFilter(tx *gorm.DB, filter ChannelTagStatsFilter) *gorm.DB {
+	tx = tx.Where("logs.type = ?", LogTypeConsume)
+	if filter.StartTimestamp > 0 {
+		tx = tx.Where("logs.created_at >= ?", filter.StartTimestamp)
+	}
+	if filter.EndTimestamp > 0 {
+		tx = tx.Where("logs.created_at <= ?", filter.EndTimestamp)
+	}
+	return tx
+}
+
+func channelTagStatsBucketSize(granularity ChannelTagStatsGranularity) int64 {
+	switch granularity {
+	case ChannelTagStatsHour:
+		return int64(time.Hour / time.Second)
+	case ChannelTagStatsWeek:
+		return int64(7 * 24 * time.Hour / time.Second)
+	default:
+		return int64(24 * time.Hour / time.Second)
+	}
+}
+
+func channelTagStatsBucketExpression(granularity ChannelTagStatsGranularity) string {
+	bucketSize := channelTagStatsBucketSize(granularity)
+	if common.UsingMySQL {
+		return fmt.Sprintf("FLOOR(logs.created_at / %d) * %d", bucketSize, bucketSize)
+	}
+	if common.UsingSQLite {
+		return fmt.Sprintf("CAST(logs.created_at / %d AS INTEGER) * %d", bucketSize, bucketSize)
+	}
+	return fmt.Sprintf("(logs.created_at / %d) * %d", bucketSize, bucketSize)
+}
+
+func channelTagStatsMetadata(channelIDs []int) (map[int]ChannelTagMetadata, error) {
+	return GetChannelTagMetadataByIds(channelIDs)
+}
+
+func addChannelTagStatsTotals(acc *channelTagAccumulator, requestCount int64, quota int64, promptTokens int64, completionTokens int64, useTimeSum int64, lastLogAt int64) {
+	acc.item.RequestCount += requestCount
+	acc.item.Quota += quota
+	acc.item.PromptTokens += promptTokens
+	acc.item.CompletionTokens += completionTokens
+	acc.item.Tokens += promptTokens + completionTokens
+	acc.useTimeSum += useTimeSum
+	if lastLogAt > acc.item.LastLogAt {
+		acc.item.LastLogAt = lastLogAt
+	}
+}
+
+func sortedChannelTagStatsItems(accumulators map[string]*channelTagAccumulator) []ChannelTagStatsItem {
+	items := make([]ChannelTagStatsItem, 0, len(accumulators))
+	for _, acc := range accumulators {
+		if acc.item.RequestCount > 0 {
+			acc.item.AverageUseTime = float64(acc.useTimeSum) / float64(acc.item.RequestCount)
+		}
+		acc.item.ChannelCount = len(acc.channels)
+		items = append(items, acc.item)
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].Quota != items[j].Quota {
+			return items[i].Quota > items[j].Quota
+		}
+		if items[i].RequestCount != items[j].RequestCount {
+			return items[i].RequestCount > items[j].RequestCount
+		}
+		return items[i].TagName < items[j].TagName
+	})
+	return items
+}
+
+func topChannelTagKeysForTrend(items []ChannelTagStatsItem, limit int) map[string]struct{} {
+	if limit <= 0 || limit > len(items) {
+		limit = len(items)
+	}
+	topKeys := make(map[string]struct{}, limit)
+	for i := 0; i < limit; i++ {
+		topKeys[items[i].TagKey] = struct{}{}
+	}
+	return topKeys
+}
+
+func channelTagForChannelID(channelID int, metadataByID map[int]ChannelTagMetadata) (key string, name string, exists bool) {
+	metadata, ok := metadataByID[channelID]
+	if !ok {
+		return "", "", false
+	}
+	key, name = NormalizeChannelTag(metadata.Tag)
+	return key, name, true
+}
+
+func GetChannelTagStats(ctx context.Context, filter ChannelTagStatsFilter) (*ChannelTagStatsResult, error) {
+	var err error
+	filter, err = NormalizeChannelTagStatsFilter(filter)
+	if err != nil {
+		return nil, err
+	}
+
+	var channelRows []channelTagChannelAggregate
+	channelQuery := LOG_DB.WithContext(ctx).Table("logs").
+		Select(`logs.channel_id,
+			COUNT(*) AS request_count,
+			COALESCE(SUM(logs.quota), 0) AS quota,
+			COALESCE(SUM(logs.prompt_tokens), 0) AS prompt_tokens,
+			COALESCE(SUM(logs.completion_tokens), 0) AS completion_tokens,
+			COALESCE(SUM(logs.use_time), 0) AS use_time_sum,
+			COALESCE(MAX(logs.created_at), 0) AS last_log_at`)
+	channelQuery = applyChannelTagStatsLogFilter(channelQuery, filter)
+	if err = channelQuery.Group("logs.channel_id").Scan(&channelRows).Error; err != nil {
+		return nil, err
+	}
+
+	channelIDs := make([]int, 0, len(channelRows))
+	for _, row := range channelRows {
+		if row.ChannelId > 0 {
+			channelIDs = append(channelIDs, row.ChannelId)
+		}
+	}
+	metadataByID, err := channelTagStatsMetadata(channelIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	accumulators := make(map[string]*channelTagAccumulator)
+	summaryUseTimeSum := int64(0)
+	for _, row := range channelRows {
+		key, name, exists := channelTagForChannelID(row.ChannelId, metadataByID)
+		if !exists {
+			continue
+		}
+		acc, ok := accumulators[key]
+		if !ok {
+			acc = &channelTagAccumulator{
+				item: ChannelTagStatsItem{
+					TagKey:  key,
+					TagName: name,
+				},
+				channels: make(map[int]struct{}),
+			}
+			accumulators[key] = acc
+		}
+		addChannelTagStatsTotals(acc, row.RequestCount, row.Quota, row.PromptTokens, row.CompletionTokens, row.UseTimeSum, row.LastLogAt)
+		if row.ChannelId > 0 {
+			acc.channels[row.ChannelId] = struct{}{}
+		}
+		summaryUseTimeSum += row.UseTimeSum
+	}
+
+	items := sortedChannelTagStatsItems(accumulators)
+	result := &ChannelTagStatsResult{
+		Items:       items,
+		Trend:       make([]ChannelTagStatsTrendPoint, 0),
+		Granularity: filter.Granularity,
+	}
+	for _, item := range items {
+		result.Summary.TotalQuota += item.Quota
+		result.Summary.RequestCount += item.RequestCount
+		result.Summary.PromptTokens += item.PromptTokens
+		result.Summary.CompletionTokens += item.CompletionTokens
+		result.Summary.Tokens += item.Tokens
+		result.Summary.ChannelCount += item.ChannelCount
+		if item.TagKey == UntaggedChannelTagKey {
+			result.Summary.UntaggedQuota = item.Quota
+			result.Summary.UntaggedRequestCount = item.RequestCount
+		} else {
+			result.Summary.TagCount++
+		}
+	}
+	result.Summary.TagGroupCount = len(items)
+	if result.Summary.RequestCount > 0 {
+		result.Summary.AverageUseTime = float64(summaryUseTimeSum) / float64(result.Summary.RequestCount)
+	}
+
+	var trendRows []channelTagTrendAggregate
+	bucketExpr := channelTagStatsBucketExpression(filter.Granularity)
+	trendQuery := LOG_DB.WithContext(ctx).Table("logs").
+		Select(bucketExpr + ` AS bucket_start,
+			logs.channel_id,
+			COUNT(*) AS request_count,
+			COALESCE(SUM(logs.quota), 0) AS quota,
+			COALESCE(SUM(logs.prompt_tokens), 0) AS prompt_tokens,
+			COALESCE(SUM(logs.completion_tokens), 0) AS completion_tokens`)
+	trendQuery = applyChannelTagStatsLogFilter(trendQuery, filter)
+	if err = trendQuery.Group(bucketExpr + ", logs.channel_id").Scan(&trendRows).Error; err != nil {
+		return nil, err
+	}
+
+	topKeys := topChannelTagKeysForTrend(items, filter.TrendLimit)
+	trendByBucketAndTag := make(map[int64]map[string]*ChannelTagStatsTrendPoint)
+	for _, row := range trendRows {
+		key, name, exists := channelTagForChannelID(row.ChannelId, metadataByID)
+		if !exists {
+			continue
+		}
+		if _, ok := topKeys[key]; !ok {
+			key = "__other__"
+			name = "其他"
+		}
+		if _, ok := trendByBucketAndTag[row.BucketStart]; !ok {
+			trendByBucketAndTag[row.BucketStart] = make(map[string]*ChannelTagStatsTrendPoint)
+		}
+		point, ok := trendByBucketAndTag[row.BucketStart][key]
+		if !ok {
+			point = &ChannelTagStatsTrendPoint{
+				BucketStart: row.BucketStart,
+				TagKey:      key,
+				TagName:     name,
+			}
+			trendByBucketAndTag[row.BucketStart][key] = point
+		}
+		point.RequestCount += row.RequestCount
+		point.Quota += row.Quota
+		point.PromptTokens += row.PromptTokens
+		point.CompletionTokens += row.CompletionTokens
+		point.Tokens += row.PromptTokens + row.CompletionTokens
+	}
+
+	for _, tags := range trendByBucketAndTag {
+		for _, point := range tags {
+			result.Trend = append(result.Trend, *point)
+		}
+	}
+	sort.SliceStable(result.Trend, func(i, j int) bool {
+		if result.Trend[i].BucketStart != result.Trend[j].BucketStart {
+			return result.Trend[i].BucketStart < result.Trend[j].BucketStart
+		}
+		if result.Trend[i].TagKey == "__other__" || result.Trend[j].TagKey == "__other__" {
+			return result.Trend[i].TagKey != "__other__"
+		}
+		return result.Trend[i].TagName < result.Trend[j].TagName
+	})
+
+	return result, nil
+}
 
 func formatUserLogs(logs []*Log, startIdx int) {
 	for i := range logs {

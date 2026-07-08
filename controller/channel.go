@@ -83,6 +83,43 @@ func buildChannelListQuery(group string, statusFilter int, typeFilter int) *gorm
 	return query
 }
 
+func GetChannelTagStats(c *gin.Context) {
+	startTimestamp, err := strconv.ParseInt(c.DefaultQuery("start_timestamp", "0"), 10, 64)
+	if err != nil {
+		common.ApiErrorMsg(c, "start_timestamp 参数错误")
+		return
+	}
+	endTimestamp, err := strconv.ParseInt(c.DefaultQuery("end_timestamp", "0"), 10, 64)
+	if err != nil {
+		common.ApiErrorMsg(c, "end_timestamp 参数错误")
+		return
+	}
+	trendLimit, err := strconv.Atoi(c.DefaultQuery("trend_limit", "0"))
+	if err != nil {
+		common.ApiErrorMsg(c, "trend_limit 参数错误")
+		return
+	}
+
+	filter, err := model.NormalizeChannelTagStatsFilter(model.ChannelTagStatsFilter{
+		StartTimestamp: startTimestamp,
+		EndTimestamp:   endTimestamp,
+		Granularity:    model.ChannelTagStatsGranularity(strings.TrimSpace(c.Query("granularity"))),
+		TrendLimit:     trendLimit,
+	})
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
+
+	result, err := model.GetChannelTagStats(c.Request.Context(), filter)
+	if err != nil {
+		common.SysError("failed to get channel tag stats: " + err.Error())
+		common.ApiErrorMsg(c, "获取渠道标签统计失败，请稍后重试")
+		return
+	}
+	common.ApiSuccess(c, result)
+}
+
 func GetAllChannels(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	channelData := make([]*model.Channel, 0)

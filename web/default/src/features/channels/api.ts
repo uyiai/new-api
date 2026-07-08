@@ -24,6 +24,8 @@ import type {
   BatchSetTagParams,
   Channel,
   ChannelBalanceResponse,
+  ChannelTagStatsParams,
+  ChannelTagStatsResponse,
   ChannelTestResponse,
   CopyChannelParams,
   CopyChannelResponse,
@@ -490,6 +492,16 @@ export async function getTagModels(
   tag: string
 ): Promise<{ success: boolean; message?: string; data?: string }> {
   const res = await api.get('/api/channel/tag/models', { params: { tag } })
+  return res.data
+}
+
+/**
+ * Get channel usage statistics grouped by current channel tag
+ */
+export async function getChannelTagStats(
+  params: ChannelTagStatsParams = {}
+): Promise<ChannelTagStatsResponse> {
+  const res = await api.get('/api/channel/tag_stats', { params })
   return res.data
 }
 
