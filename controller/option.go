@@ -304,6 +304,15 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "balance_tier_setting.rules":
+		err = operation_setting.ValidateBalanceTierRulesJSONString(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "余额档位规则配置错误: " + err.Error(),
+			})
+			return
+		}
 	case "channel_preparation_auto_promotion_setting.interval_minutes":
 		interval, parseErr := strconv.ParseFloat(option.Value.(string), 64)
 		if parseErr != nil || interval <= 0 {

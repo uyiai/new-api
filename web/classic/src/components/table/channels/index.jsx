@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Banner } from '@douyinfe/semi-ui';
 import { IconAlertTriangle } from '@douyinfe/semi-icons';
 import CardPro from '../../common/ui/CardPro';
@@ -35,15 +35,23 @@ import EditTagModal from './modals/EditTagModal';
 import MultiKeyManageModal from './modals/MultiKeyManageModal';
 import ChannelUpstreamUpdateModal from './modals/ChannelUpstreamUpdateModal';
 import BatchImportModal from './modals/BatchImportModal';
+import BalanceTierRulesModal from './modals/BalanceTierRulesModal';
 import { createCardProPagination } from '../../../helpers/utils';
 
 const ChannelsPage = () => {
   const channelsData = useChannelsData();
   const isMobile = useIsMobile();
+  const [showBalanceTierRules, setShowBalanceTierRules] = useState(false);
 
   return (
     <>
       {/* Modals */}
+      <BalanceTierRulesModal
+        visible={showBalanceTierRules}
+        onCancel={() => setShowBalanceTierRules(false)}
+        groupOptions={channelsData.groupOptions}
+        onApplied={channelsData.refresh}
+      />
       <ColumnSelectorModal {...channelsData} />
       <EditTagModal
         visible={channelsData.showEditTag}
@@ -102,7 +110,12 @@ const ChannelsPage = () => {
         type='type3'
         tabsArea={<ChannelsTabs {...channelsData} />}
         actionsArea={<ChannelsActions {...channelsData} />}
-        searchArea={<ChannelsFilters {...channelsData} />}
+        searchArea={
+          <ChannelsFilters
+            {...channelsData}
+            setShowBalanceTierRules={setShowBalanceTierRules}
+          />
+        }
         paginationArea={createCardProPagination({
           currentPage: channelsData.activePage,
           pageSize: channelsData.pageSize,

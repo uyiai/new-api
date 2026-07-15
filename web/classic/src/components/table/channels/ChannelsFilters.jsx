@@ -42,6 +42,7 @@ const ChannelsFilters = ({
   setAutoRefreshEnabled,
   setAutoRefreshSeconds,
   setShowBatchImport,
+  setShowBalanceTierRules,
   t,
 }) => {
   const formattedStats = useMemo(() => {
@@ -133,6 +134,15 @@ const ChannelsFilters = ({
             </Button>
           </Tooltip>
         </div>
+
+        <Button
+          size='small'
+          type='tertiary'
+          className='w-full md:w-auto'
+          onClick={() => setShowBalanceTierRules(true)}
+        >
+          {t('余额档位规则')}
+        </Button>
       </div>
 
       <div className='flex flex-col md:flex-row items-center gap-2 w-full md:w-auto order-1 md:order-2'>
