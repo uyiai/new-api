@@ -306,7 +306,7 @@ const renderRateLimitBucketLine = (label, remaining, limit, resetTime, t) => {
   );
 };
 
-const renderUpstreamRateLimitStatus = (record, t) => {
+export const renderUpstreamRateLimitStatus = (record, t) => {
   if (!record || record.children !== undefined) return '-';
   const status = record.upstream_rate_limit_status;
   if (!status) {

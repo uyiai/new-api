@@ -230,8 +230,12 @@ func GetChannelPreparations(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	responses, err := model.ChannelPreparationResponsesWithRateLimitStatuses(preparations)
+	if err != nil {
+		common.SysError("failed to attach preparation upstream rate limit statuses: " + err.Error())
+	}
 	common.ApiSuccess(c, gin.H{
-		"items":         model.ChannelPreparationResponses(preparations),
+		"items":         responses,
 		"total":         total,
 		"page":          opts.Page,
 		"page_size":     opts.PageSize,

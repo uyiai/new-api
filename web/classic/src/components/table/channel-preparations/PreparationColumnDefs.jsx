@@ -15,7 +15,10 @@ import {
   PREPARATION_STATUS_LABELS,
   PREPARATION_TEST_STATUS,
 } from '../../../hooks/channels/useChannelPreparationsData';
-import { renderResponseTime } from '../channels/ChannelsColumnDefs';
+import {
+  renderResponseTime,
+  renderUpstreamRateLimitStatus,
+} from '../channels/ChannelsColumnDefs';
 
 const statusColor = {
   [PREPARATION_STATUS.PENDING]: 'blue',
@@ -108,6 +111,13 @@ export const getPreparationColumns = ({
     key: 'response_time',
     width: 110,
     render: (value) => renderResponseTime(value ?? 0, t),
+  },
+  {
+    title: t('限流'),
+    dataIndex: 'upstream_rate_limit_status',
+    key: 'upstream_rate_limit_status',
+    width: 150,
+    render: (_, record) => renderUpstreamRateLimitStatus(record, t),
   },
   {
     title: t('分组'),

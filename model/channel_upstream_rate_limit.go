@@ -182,7 +182,7 @@ func mergeUpstreamRateLimitStatus(current ChannelUpstreamRateLimitStatus, next C
 }
 
 func UpdateChannelUpstreamRateLimitStatus(channelId int, channelType int, baseURL string, key string, statusCode int, header http.Header) {
-	if header == nil || channelId <= 0 {
+	if header == nil || channelId < 0 {
 		return
 	}
 	provider, normalizedBaseURL, keyHash, ok := buildChannelUpstreamRateLimitIdentity(channelType, baseURL, key)

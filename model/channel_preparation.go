@@ -60,40 +60,41 @@ type ChannelPreparation struct {
 }
 
 type ChannelPreparationResponse struct {
-	Id                 int     `json:"id"`
-	Type               int     `json:"type"`
-	KeyPreview         string  `json:"key_preview"`
-	OpenAIOrganization *string `json:"openai_organization"`
-	TestModel          *string `json:"test_model"`
-	Name               string  `json:"name"`
-	Weight             *uint   `json:"weight"`
-	CreatedTime        int64   `json:"created_time"`
-	UpdatedTime        int64   `json:"updated_time"`
-	TestTime           int64   `json:"test_time"`
-	ResponseTime       int     `json:"response_time"`
-	TestStatus         int     `json:"test_status"`
-	TestMessage        string  `json:"test_message"`
-	BaseURL            *string `json:"base_url"`
-	Other              string  `json:"other"`
-	Balance            float64 `json:"balance"`
-	Models             string  `json:"models"`
-	Group              string  `json:"group"`
-	ModelMapping       *string `json:"model_mapping"`
-	StatusCodeMapping  *string `json:"status_code_mapping"`
-	Priority           *int64  `json:"priority"`
-	AutoBan            *int    `json:"auto_ban"`
-	OtherInfo          string  `json:"other_info"`
-	Tag                *string `json:"tag"`
-	Setting            *string `json:"setting"`
-	ParamOverride      *string `json:"param_override"`
-	HeaderOverride     *string `json:"header_override"`
-	Remark             *string `json:"remark"`
-	OtherSettings      string  `json:"settings"`
-	Status             int     `json:"status"`
-	Source             string  `json:"source"`
-	Note               string  `json:"note"`
-	PromotedTime       *int64  `json:"promoted_time"`
-	PromotedChannelId  *int    `json:"promoted_channel_id"`
+	Id                      int                             `json:"id"`
+	Type                    int                             `json:"type"`
+	KeyPreview              string                          `json:"key_preview"`
+	OpenAIOrganization      *string                         `json:"openai_organization"`
+	TestModel               *string                         `json:"test_model"`
+	Name                    string                          `json:"name"`
+	Weight                  *uint                           `json:"weight"`
+	CreatedTime             int64                           `json:"created_time"`
+	UpdatedTime             int64                           `json:"updated_time"`
+	TestTime                int64                           `json:"test_time"`
+	ResponseTime            int                             `json:"response_time"`
+	TestStatus              int                             `json:"test_status"`
+	TestMessage             string                          `json:"test_message"`
+	BaseURL                 *string                         `json:"base_url"`
+	Other                   string                          `json:"other"`
+	Balance                 float64                         `json:"balance"`
+	Models                  string                          `json:"models"`
+	Group                   string                          `json:"group"`
+	ModelMapping            *string                         `json:"model_mapping"`
+	StatusCodeMapping       *string                         `json:"status_code_mapping"`
+	Priority                *int64                          `json:"priority"`
+	AutoBan                 *int                            `json:"auto_ban"`
+	OtherInfo               string                          `json:"other_info"`
+	Tag                     *string                         `json:"tag"`
+	Setting                 *string                         `json:"setting"`
+	ParamOverride           *string                         `json:"param_override"`
+	HeaderOverride          *string                         `json:"header_override"`
+	Remark                  *string                         `json:"remark"`
+	OtherSettings           string                          `json:"settings"`
+	Status                  int                             `json:"status"`
+	Source                  string                          `json:"source"`
+	Note                    string                          `json:"note"`
+	PromotedTime            *int64                          `json:"promoted_time"`
+	PromotedChannelId       *int                            `json:"promoted_channel_id"`
+	UpstreamRateLimitStatus *ChannelUpstreamRateLimitStatus `json:"upstream_rate_limit_status,omitempty"`
 }
 
 type ChannelPreparationListOptions struct {
@@ -213,6 +214,31 @@ func ChannelPreparationResponses(preparations []ChannelPreparation) []ChannelPre
 		responses = append(responses, preparation.ToResponse())
 	}
 	return responses
+}
+
+func ChannelPreparationResponsesWithRateLimitStatuses(preparations []ChannelPreparation) ([]ChannelPreparationResponse, error) {
+	responses := ChannelPreparationResponses(preparations)
+	if len(preparations) == 0 {
+		return responses, nil
+	}
+
+	channels := make([]*Channel, 0, len(preparations))
+	responseIndexes := make([]int, 0, len(preparations))
+	for index := range preparations {
+		channel := preparations[index].ToChannel()
+		channels = append(channels, channel)
+		responseIndexes = append(responseIndexes, index)
+	}
+	if err := AttachChannelUpstreamRateLimitStatuses(channels); err != nil {
+		return responses, err
+	}
+	for index, channel := range channels {
+		if channel == nil || channel.UpstreamRateLimitStatus == nil {
+			continue
+		}
+		responses[responseIndexes[index]].UpstreamRateLimitStatus = channel.UpstreamRateLimitStatus
+	}
+	return responses, nil
 }
 
 type ChannelPreparationKeyGroup struct {

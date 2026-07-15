@@ -2,10 +2,13 @@ package model
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -32,7 +35,7 @@ func setupChannelPreparationModelTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	DB = db
 	LOG_DB = db
-	require.NoError(t, db.AutoMigrate(&ChannelPreparation{}))
+	require.NoError(t, db.AutoMigrate(&ChannelPreparation{}, &ChannelUpstreamRateLimitStatus{}))
 
 	t.Cleanup(func() {
 		DB = previousDB
@@ -161,6 +164,34 @@ func TestChannelPreparationResponseAndToChannelIncludeTestFields(t *testing.T) {
 	channel := preparation.ToChannel()
 	require.Equal(t, int64(300), channel.TestTime)
 	require.Equal(t, 456, channel.ResponseTime)
+}
+
+func TestChannelPreparationResponsesWithRateLimitStatusesAttachesStatusWithoutKeyLeak(t *testing.T) {
+	setupChannelPreparationModelTestDB(t)
+	resetChannelUpstreamRateLimitStatusTestStores()
+	t.Cleanup(resetChannelUpstreamRateLimitStatusTestStores)
+
+	resetTime := time.Now().Add(90 * time.Second).UTC().Truncate(time.Second)
+	header := http.Header{}
+	header.Set(headerReqLimit, "50")
+	header.Set(headerReqRemaining, "7")
+	header.Set(headerReqReset, resetTime.Format(time.RFC3339))
+	UpdateChannelUpstreamRateLimitStatus(0, constant.ChannelTypeAnthropic, constant.ChannelBaseURLs[constant.ChannelTypeAnthropic], " sk-preparation-secret ", http.StatusOK, header)
+	FlushChannelUpstreamRateLimitStatusOnce()
+
+	preparations := []ChannelPreparation{
+		{Id: 1, Type: constant.ChannelTypeAnthropic, Key: " sk-preparation-secret ", Name: "candidate", Group: "default", Status: ChannelPreparationStatusPending},
+		{Id: 2, Type: constant.ChannelTypeAnthropic, Key: "sk-missing", Name: "missing", Group: "default", Status: ChannelPreparationStatusPending},
+	}
+	responses, err := ChannelPreparationResponsesWithRateLimitStatuses(preparations)
+	require.NoError(t, err)
+	require.Len(t, responses, 2)
+	require.Equal(t, "sk-prepa...cret", responses[0].KeyPreview)
+	require.NotContains(t, fmt.Sprintf("%+v", responses[0]), "sk-preparation-secret")
+	require.NotNil(t, responses[0].UpstreamRateLimitStatus)
+	require.NotNil(t, responses[0].UpstreamRateLimitStatus.RequestsRemaining)
+	require.Equal(t, 7, *responses[0].UpstreamRateLimitStatus.RequestsRemaining)
+	require.Nil(t, responses[1].UpstreamRateLimitStatus)
 }
 
 func TestFindActiveChannelPreparationKeyConflictsOnlyBlocksUnconsumedRecords(t *testing.T) {
