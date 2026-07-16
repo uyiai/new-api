@@ -13,6 +13,9 @@ const (
 	BalanceTierStrategyLowerEffectiveBalanceHigherPriority  = "lower_effective_balance_higher_priority"
 	BalanceTierStrategyHigherEffectiveBalanceHigherPriority = "higher_effective_balance_higher_priority"
 	BalanceTierStrategyKeepPriority                         = "keep_priority"
+
+	BalanceTierMetricEffectiveBalance = "effective_balance"
+	BalanceTierMetricRemainingRatio   = "remaining_ratio"
 )
 
 type BalanceTierRule struct {
@@ -24,8 +27,11 @@ type BalanceTierRule struct {
 	Tags                []string `json:"tags,omitempty"`
 	BalanceMin          *float64 `json:"balance_min,omitempty"`
 	BalanceMax          *float64 `json:"balance_max,omitempty"`
+	Metric              string   `json:"metric,omitempty"`
 	EffectiveBalanceMin *float64 `json:"effective_balance_min,omitempty"`
 	EffectiveBalanceMax *float64 `json:"effective_balance_max,omitempty"`
+	RemainingRatioMin   *float64 `json:"remaining_ratio_min,omitempty"`
+	RemainingRatioMax   *float64 `json:"remaining_ratio_max,omitempty"`
 	Strategy            string   `json:"strategy"`
 	FixedPriority       *int64   `json:"fixed_priority,omitempty"`
 	MinPriority         *int64   `json:"min_priority,omitempty"`
@@ -55,7 +61,9 @@ func GetBalanceTierSetting() *BalanceTierSetting {
 
 func GetBalanceTierSettingSnapshot() BalanceTierSetting {
 	setting := *GetBalanceTierSetting()
-	return CloneBalanceTierSetting(setting)
+	cloned := CloneBalanceTierSetting(setting)
+	NormalizeBalanceTierSetting(&cloned)
+	return cloned
 }
 
 func CloneBalanceTierSetting(setting BalanceTierSetting) BalanceTierSetting {
@@ -85,6 +93,10 @@ func NormalizeBalanceTierSetting(setting *BalanceTierSetting) {
 		rule := &setting.Rules[i]
 		rule.Id = strings.TrimSpace(rule.Id)
 		rule.Name = strings.TrimSpace(rule.Name)
+		rule.Metric = strings.TrimSpace(rule.Metric)
+		if rule.Metric == "" {
+			rule.Metric = BalanceTierMetricEffectiveBalance
+		}
 		rule.Strategy = strings.TrimSpace(rule.Strategy)
 		rule.Groups = normalizeBalanceTierStrings(rule.Groups)
 		rule.Tags = normalizeBalanceTierStrings(rule.Tags)
@@ -120,6 +132,15 @@ func IsSupportedBalanceTierStrategy(strategy string) bool {
 	}
 }
 
+func IsSupportedBalanceTierMetric(metric string) bool {
+	switch metric {
+	case BalanceTierMetricEffectiveBalance, BalanceTierMetricRemainingRatio:
+		return true
+	default:
+		return false
+	}
+}
+
 func ValidateBalanceTierSetting(setting BalanceTierSetting) error {
 	setting = CloneBalanceTierSetting(setting)
 	NormalizeBalanceTierSetting(&setting)
@@ -138,10 +159,16 @@ func ValidateBalanceTierSetting(setting BalanceTierSetting) error {
 		if !IsSupportedBalanceTierStrategy(rule.Strategy) {
 			return fmt.Errorf("第 %d 条规则策略无效", i+1)
 		}
+		if !IsSupportedBalanceTierMetric(rule.Metric) {
+			return fmt.Errorf("第 %d 条规则匹配指标无效", i+1)
+		}
 		if err := validateBalanceTierRange(rule.BalanceMin, rule.BalanceMax, i, "档位余额"); err != nil {
 			return err
 		}
 		if err := validateBalanceTierRange(rule.EffectiveBalanceMin, rule.EffectiveBalanceMax, i, "有效剩余额度"); err != nil {
+			return err
+		}
+		if err := validateBalanceTierRange(rule.RemainingRatioMin, rule.RemainingRatioMax, i, "剩余比例"); err != nil {
 			return err
 		}
 		switch rule.Strategy {
@@ -151,8 +178,8 @@ func ValidateBalanceTierSetting(setting BalanceTierSetting) error {
 			}
 		case BalanceTierStrategyLowerEffectiveBalanceHigherPriority,
 			BalanceTierStrategyHigherEffectiveBalanceHigherPriority:
-			if rule.EffectiveBalanceMin == nil || rule.EffectiveBalanceMax == nil || *rule.EffectiveBalanceMin == *rule.EffectiveBalanceMax {
-				return fmt.Errorf("第 %d 条动态规则必须设置不同的有效余额上下限", i+1)
+			if err := validateBalanceTierDynamicRange(rule, i); err != nil {
+				return err
 			}
 			if rule.MinPriority == nil || rule.MaxPriority == nil {
 				return fmt.Errorf("第 %d 条动态规则缺少优先级上下限", i+1)
@@ -180,6 +207,23 @@ func ValidateBalanceTierRulesJSONString(value string) error {
 func validateBalanceTierRange(minimum, maximum *float64, index int, name string) error {
 	if minimum != nil && maximum != nil && *minimum > *maximum {
 		return fmt.Errorf("第 %d 条规则%s下限不能大于上限", index+1, name)
+	}
+	return nil
+}
+
+func validateBalanceTierDynamicRange(rule BalanceTierRule, index int) error {
+	var minimum, maximum *float64
+	name := "有效余额"
+	if rule.Metric == BalanceTierMetricRemainingRatio {
+		minimum = rule.RemainingRatioMin
+		maximum = rule.RemainingRatioMax
+		name = "剩余比例"
+	} else {
+		minimum = rule.EffectiveBalanceMin
+		maximum = rule.EffectiveBalanceMax
+	}
+	if minimum == nil || maximum == nil || *minimum == *maximum {
+		return fmt.Errorf("第 %d 条动态规则必须设置不同的%s上下限", index+1, name)
 	}
 	return nil
 }

@@ -22,6 +22,7 @@ type balanceTierDetail struct {
 	Balance          float64 `json:"balance"`
 	UsedQuotaUSD     float64 `json:"used_quota_usd"`
 	EffectiveBalance float64 `json:"effective_balance"`
+	RemainingRatio   float64 `json:"remaining_ratio"`
 	OldPriority      int64   `json:"old_priority"`
 	NewPriority      int64   `json:"new_priority"`
 	MatchedRuleId    string  `json:"matched_rule_id,omitempty"`
@@ -197,10 +198,11 @@ func evaluateBalanceTierRulesWithDB(db *gorm.DB, setting operation_setting.Balan
 			usedQuotaUSD = float64(channel.UsedQuota) / quotaPerUnit
 		}
 		effectiveBalance := channel.Balance - usedQuotaUSD
+		remainingRatio := calculateBalanceTierRemainingRatio(channel.Balance, effectiveBalance)
 		detail := balanceTierDetail{
 			ChannelId: channel.Id, ChannelName: channel.Name, ChannelType: channel.Type,
 			Group: channel.Group, Tag: tag, Balance: channel.Balance,
-			UsedQuotaUSD: usedQuotaUSD, EffectiveBalance: effectiveBalance,
+			UsedQuotaUSD: usedQuotaUSD, EffectiveBalance: effectiveBalance, RemainingRatio: remainingRatio,
 			OldPriority: oldPriority, NewPriority: oldPriority,
 		}
 		switch {
@@ -209,13 +211,13 @@ func evaluateBalanceTierRulesWithDB(db *gorm.DB, setting operation_setting.Balan
 		case effectiveBalance < 0:
 			detail.Reason = "有效剩余额度小于 0，跳过"
 		default:
-			rule := matchBalanceTierRule(setting.Rules, channel, tag, effectiveBalance)
+			rule := matchBalanceTierRule(setting.Rules, channel, tag, effectiveBalance, remainingRatio)
 			if rule == nil {
 				detail.Reason = "未命中规则"
 			} else {
 				detail.MatchedRuleId = rule.Id
 				detail.MatchedRuleName = rule.Name
-				detail.NewPriority = calculateBalanceTierPriority(*rule, effectiveBalance, oldPriority)
+				detail.NewPriority = calculateBalanceTierPriority(*rule, effectiveBalance, remainingRatio, oldPriority)
 				detail.Changed = detail.NewPriority != oldPriority
 				result.Summary.MatchedChannels++
 				if rule.Strategy == operation_setting.BalanceTierStrategyKeepPriority {
@@ -238,15 +240,17 @@ func evaluateBalanceTierRulesWithDB(db *gorm.DB, setting operation_setting.Balan
 	return result, nil
 }
 
-func matchBalanceTierRule(rules []operation_setting.BalanceTierRule, channel model.Channel, tag string, effectiveBalance float64) *operation_setting.BalanceTierRule {
+func matchBalanceTierRule(rules []operation_setting.BalanceTierRule, channel model.Channel, tag string, effectiveBalance float64, remainingRatio float64) *operation_setting.BalanceTierRule {
 	for i := range rules {
 		rule := &rules[i]
+		metricValue := balanceTierMetricValue(*rule, effectiveBalance, remainingRatio)
+		metricMin, metricMax := balanceTierMetricRange(*rule)
 		if !rule.Enabled ||
 			!balanceTierContainsInt(rule.ChannelTypes, channel.Type) ||
 			!balanceTierContainsGroup(rule.Groups, channel.Group) ||
 			!balanceTierContainsString(rule.Tags, tag) ||
 			!balanceTierInRange(channel.Balance, rule.BalanceMin, rule.BalanceMax) ||
-			!balanceTierInRange(effectiveBalance, rule.EffectiveBalanceMin, rule.EffectiveBalanceMax) {
+			!balanceTierInRange(metricValue, metricMin, metricMax) {
 			continue
 		}
 		return rule
@@ -294,16 +298,41 @@ func balanceTierInRange(value float64, minimum, maximum *float64) bool {
 	return (minimum == nil || value >= *minimum) && (maximum == nil || value <= *maximum)
 }
 
-func calculateBalanceTierPriority(rule operation_setting.BalanceTierRule, effectiveBalance float64, oldPriority int64) int64 {
+func calculateBalanceTierRemainingRatio(balance float64, effectiveBalance float64) float64 {
+	if balance <= 0 {
+		return 0
+	}
+	ratio := effectiveBalance / balance * 100
+	return math.Max(0, math.Min(100, ratio))
+}
+
+func balanceTierMetricValue(rule operation_setting.BalanceTierRule, effectiveBalance float64, remainingRatio float64) float64 {
+	if rule.Metric == operation_setting.BalanceTierMetricRemainingRatio {
+		return remainingRatio
+	}
+	return effectiveBalance
+}
+
+func balanceTierMetricRange(rule operation_setting.BalanceTierRule) (*float64, *float64) {
+	if rule.Metric == operation_setting.BalanceTierMetricRemainingRatio {
+		return rule.RemainingRatioMin, rule.RemainingRatioMax
+	}
+	return rule.EffectiveBalanceMin, rule.EffectiveBalanceMax
+}
+
+func calculateBalanceTierPriority(rule operation_setting.BalanceTierRule, effectiveBalance float64, remainingRatio float64, oldPriority int64) int64 {
 	switch rule.Strategy {
 	case operation_setting.BalanceTierStrategyFixedPriority:
 		return *rule.FixedPriority
 	case operation_setting.BalanceTierStrategyKeepPriority:
 		return oldPriority
 	}
-	minimumBalance := *rule.EffectiveBalanceMin
-	maximumBalance := *rule.EffectiveBalanceMax
-	ratio := (effectiveBalance - minimumBalance) / (maximumBalance - minimumBalance)
+	minimumBalance, maximumBalance := balanceTierMetricRange(rule)
+	if minimumBalance == nil || maximumBalance == nil || *minimumBalance == *maximumBalance {
+		return oldPriority
+	}
+	metricValue := balanceTierMetricValue(rule, effectiveBalance, remainingRatio)
+	ratio := (metricValue - *minimumBalance) / (*maximumBalance - *minimumBalance)
 	ratio = math.Max(0, math.Min(1, ratio))
 	if rule.Strategy == operation_setting.BalanceTierStrategyLowerEffectiveBalanceHigherPriority {
 		ratio = 1 - ratio

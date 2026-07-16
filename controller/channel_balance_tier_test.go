@@ -101,6 +101,63 @@ func TestEvaluateBalanceTierRulesFirstMatchAndSkipsNegativeEffectiveBalance(t *t
 	require.False(t, result.Details[1].Changed)
 }
 
+func TestEvaluateBalanceTierRulesSupportsRemainingRatioMetric(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+
+	originalQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 500000
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+
+	channels := []model.Channel{
+		{
+			Id:        21,
+			Type:      constant.ChannelTypeAnthropic,
+			Key:       "sk-small-full",
+			Name:      "small full",
+			Status:    common.ChannelStatusEnabled,
+			Group:     "default",
+			Balance:   5,
+			UsedQuota: 0,
+			Priority:  int64Ptr(1),
+		},
+		{
+			Id:        22,
+			Type:      constant.ChannelTypeAnthropic,
+			Key:       "sk-large-low-ratio",
+			Name:      "large low ratio",
+			Status:    common.ChannelStatusEnabled,
+			Group:     "default",
+			Balance:   100,
+			UsedQuota: int64(90 * common.QuotaPerUnit),
+			Priority:  int64Ptr(1),
+		},
+	}
+	require.NoError(t, db.Create(&channels).Error)
+
+	setting := operation_setting.BalanceTierSetting{Enabled: true, Rules: []operation_setting.BalanceTierRule{{
+		Id:                "ratio-low",
+		Name:              "区间档按剩余比例",
+		Enabled:           true,
+		BalanceMin:        balanceTierFloat64Ptr(5),
+		BalanceMax:        balanceTierFloat64Ptr(100),
+		Metric:            operation_setting.BalanceTierMetricRemainingRatio,
+		RemainingRatioMin: balanceTierFloat64Ptr(0),
+		RemainingRatioMax: balanceTierFloat64Ptr(20),
+		Strategy:          operation_setting.BalanceTierStrategyLowerEffectiveBalanceHigherPriority,
+		MinPriority:       int64Ptr(0),
+		MaxPriority:       int64Ptr(100),
+	}}}
+
+	result, err := evaluateBalanceTierRules(setting)
+	require.NoError(t, err)
+	require.Len(t, result.Details, 2)
+	require.Empty(t, result.Details[0].MatchedRuleId)
+	require.Equal(t, float64(100), result.Details[0].RemainingRatio)
+	require.Equal(t, "ratio-low", result.Details[1].MatchedRuleId)
+	require.Equal(t, float64(10), result.Details[1].RemainingRatio)
+	require.Equal(t, int64(50), result.Details[1].NewPriority)
+}
+
 func TestApplyBalanceTierRulesSyncsStaleAbilityPriority(t *testing.T) {
 	db := setupModelListControllerTestDB(t)
 	require.NoError(t, db.AutoMigrate(&model.Option{}))
