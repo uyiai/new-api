@@ -65,7 +65,9 @@ export default function SettingClaudeModel(props) {
     'claude.thinking_adapter_enabled': true,
     'claude.default_max_tokens': '',
     'claude.thinking_adapter_budget_tokens_percentage': 0.8,
+    'claude.default_import_profile': 'anthropic_official',
   });
+  const [importProfiles, setImportProfiles] = useState([]);
   const refForm = useRef();
   const [inputsRow, setInputsRow] = useState(inputs);
 
@@ -101,7 +103,9 @@ export default function SettingClaudeModel(props) {
   }
 
   useEffect(() => {
-    const currentInputs = {};
+    const currentInputs = {
+      'claude.default_import_profile': 'anthropic_official',
+    };
     for (let key in props.options) {
       if (Object.keys(inputs).includes(key)) {
         currentInputs[key] = props.options[key];
@@ -112,6 +116,31 @@ export default function SettingClaudeModel(props) {
     refForm.current.setValues(currentInputs);
   }, [props.options]);
 
+  useEffect(() => {
+    if (importProfiles.length === 0) return;
+    const currentProfile = inputs['claude.default_import_profile'];
+    if (importProfiles.some((profile) => profile.id === currentProfile)) return;
+    const fallbackProfile = importProfiles[0].id;
+    setInputs((current) => ({
+      ...current,
+      'claude.default_import_profile': fallbackProfile,
+    }));
+    refForm.current?.setValue('claude.default_import_profile', fallbackProfile);
+  }, [importProfiles, inputs]);
+
+  useEffect(() => {
+    API.get('/api/channel/import/profiles')
+      .then((response) => {
+        if (!response.data?.success) {
+          throw new Error(response.data?.message || t('加载导入来源失败'));
+        }
+        setImportProfiles(response.data.data?.profiles || []);
+      })
+      .catch((error) => {
+        showError(error.message || t('加载导入来源失败'));
+      });
+  }, [t]);
+
   return (
     <>
       <Spin spinning={loading}>
@@ -121,6 +150,27 @@ export default function SettingClaudeModel(props) {
           style={{ marginBottom: 15 }}
         >
           <Form.Section text={t('Claude设置')}>
+            <Row>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Select
+                  label={t('默认批量导入来源')}
+                  field={'claude.default_import_profile'}
+                  optionList={importProfiles.map((profile) => ({
+                    value: profile.id,
+                    label: t(profile.label),
+                  }))}
+                  extraText={t(
+                    '同时应用于正式渠道和备用池；导入时仍可临时切换。',
+                  )}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      'claude.default_import_profile': value,
+                    })
+                  }
+                />
+              </Col>
+            </Row>
             <Row>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Form.TextArea

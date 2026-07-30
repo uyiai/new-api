@@ -104,7 +104,7 @@ func EnsureRequiredDirectAnthropicModelList(models string) (string, bool) {
 }
 
 func NormalizeDirectAnthropicChannelModels(channel *Channel) bool {
-	if channel == nil || channel.Type != constant.ChannelTypeAnthropic {
+	if !isOfficialDirectAnthropicChannel(channel) {
 		return false
 	}
 	changed := false
@@ -122,7 +122,7 @@ func NormalizeDirectAnthropicChannelModels(channel *Channel) bool {
 }
 
 func NormalizeDirectAnthropicPreparationModels(preparation *ChannelPreparation) bool {
-	if preparation == nil || preparation.Type != constant.ChannelTypeAnthropic {
+	if !isOfficialDirectAnthropicPreparation(preparation) {
 		return false
 	}
 	changed := false
@@ -140,7 +140,7 @@ func NormalizeDirectAnthropicPreparationModels(preparation *ChannelPreparation) 
 }
 
 func ensureRequiredDirectAnthropicChannelModels(channel *Channel) bool {
-	if channel == nil || channel.Type != constant.ChannelTypeAnthropic {
+	if !isOfficialDirectAnthropicChannel(channel) {
 		return false
 	}
 	changed := false
@@ -158,7 +158,7 @@ func ensureRequiredDirectAnthropicChannelModels(channel *Channel) bool {
 }
 
 func ensureRequiredDirectAnthropicPreparationModels(preparation *ChannelPreparation) bool {
-	if preparation == nil || preparation.Type != constant.ChannelTypeAnthropic {
+	if !isOfficialDirectAnthropicPreparation(preparation) {
 		return false
 	}
 	changed := false
@@ -173,6 +173,27 @@ func ensureRequiredDirectAnthropicPreparationModels(preparation *ChannelPreparat
 		}
 	}
 	return changed
+}
+
+func isOfficialDirectAnthropicBaseURL(baseURL *string) bool {
+	if baseURL == nil || strings.TrimSpace(*baseURL) == "" {
+		return true
+	}
+	actual := strings.TrimRight(strings.TrimSpace(*baseURL), "/")
+	official := strings.TrimRight(constant.ChannelBaseURLs[constant.ChannelTypeAnthropic], "/")
+	return actual == official
+}
+
+func isOfficialDirectAnthropicChannel(channel *Channel) bool {
+	return channel != nil &&
+		channel.Type == constant.ChannelTypeAnthropic &&
+		isOfficialDirectAnthropicBaseURL(channel.BaseURL)
+}
+
+func isOfficialDirectAnthropicPreparation(preparation *ChannelPreparation) bool {
+	return preparation != nil &&
+		preparation.Type == constant.ChannelTypeAnthropic &&
+		isOfficialDirectAnthropicBaseURL(preparation.BaseURL)
 }
 
 func NormalizeRetiredDirectAnthropicModelsInDatabase() error {

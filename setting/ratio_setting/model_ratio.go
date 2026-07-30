@@ -161,6 +161,7 @@ var defaultModelRatio = map[string]float64{
 	"claude-opus-4-8-high":                      2.5,
 	"claude-opus-4-8-medium":                    2.5,
 	"claude-opus-4-8-low":                       2.5,
+	"claude-opus-5":                             2.5,
 	"claude-3-opus-20240229":                    7.5, // $15 / 1M tokens
 	"claude-opus-4-20250514":                    7.5,
 	"claude-opus-4-1-20250805":                  7.5,
@@ -347,6 +348,7 @@ var defaultCompletionRatio = map[string]float64{
 	"gpt-4-all":       2,
 	"claude-sonnet-5": 5,
 	"claude-fable-5":  5,
+	"claude-opus-5":   5,
 	"gpt-image-1":     8,
 }
 
@@ -414,17 +416,17 @@ func handleThinkingBudgetModel(name, prefix, wildcard string) string {
 func GetModelRatio(name string) (float64, bool, string) {
 	name = FormatMatchingModelName(name)
 
-	ratio, ok := modelRatioMap.Get(name)
-	if !ok {
-		if strings.HasSuffix(name, CompactModelSuffix) {
-			if wildcardRatio, ok := modelRatioMap.Get(CompactWildcardModelKey); ok {
-				return wildcardRatio, true, name
-			}
-			//return 0, true, name
+	for _, candidate := range ratioLookupCandidates(name) {
+		if ratio, ok := modelRatioMap.Get(candidate); ok {
+			return ratio, true, candidate
 		}
-		return 37.5, operation_setting.SelfUseModeEnabled, name
 	}
-	return ratio, true, name
+	if strings.HasSuffix(name, CompactModelSuffix) {
+		if wildcardRatio, ok := modelRatioMap.Get(CompactWildcardModelKey); ok {
+			return wildcardRatio, true, name
+		}
+	}
+	return 37.5, operation_setting.SelfUseModeEnabled, name
 }
 
 func DefaultModelRatio2JSONString() string {
@@ -454,18 +456,21 @@ func UpdateCompletionRatioByJSONString(jsonStr string) error {
 func GetCompletionRatio(name string) float64 {
 	name = FormatMatchingModelName(name)
 
-	if strings.Contains(name, "/") {
-		if ratio, ok := completionRatioMap.Get(name); ok {
+	for _, candidate := range ratioLookupCandidates(name) {
+		if strings.Contains(candidate, "/") {
+			if ratio, ok := completionRatioMap.Get(candidate); ok {
+				return ratio
+			}
+		}
+		hardCodedRatio, contain := getHardcodedCompletionModelRatio(candidate)
+		if contain {
+			return hardCodedRatio
+		}
+		if ratio, ok := completionRatioMap.Get(candidate); ok {
 			return ratio
 		}
 	}
-	hardCodedRatio, contain := getHardcodedCompletionModelRatio(name)
-	if contain {
-		return hardCodedRatio
-	}
-	if ratio, ok := completionRatioMap.Get(name); ok {
-		return ratio
-	}
+	hardCodedRatio, _ := getHardcodedCompletionModelRatio(name)
 	return hardCodedRatio
 }
 
@@ -750,6 +755,13 @@ func FormatMatchingModelName(name string) string {
 		name = "gpt-4o-gizmo-*"
 	}
 	return name
+}
+
+func ratioLookupCandidates(name string) []string {
+	if strings.HasPrefix(name, "claude-") && strings.HasSuffix(name, "-thinking") {
+		return []string{name, strings.TrimSuffix(name, "-thinking")}
+	}
+	return []string{name}
 }
 
 // result: 倍率or价格， usePrice， exist

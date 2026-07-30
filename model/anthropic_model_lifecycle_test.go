@@ -40,6 +40,30 @@ func TestNormalizeDirectAnthropicChannelModelsOnlyTouchesDirectAnthropic(t *test
 	}
 	require.False(t, NormalizeDirectAnthropicChannelModels(aws))
 	require.Equal(t, "claude-3-sonnet-20240229", aws.Models)
+
+	cloudflareBaseURL := "https://gateway.ai.cloudflare.com/v1/account/default/anthropic"
+	cloudflare := &Channel{
+		Type:    constant.ChannelTypeAnthropic,
+		BaseURL: &cloudflareBaseURL,
+		Models:  "claude-3-sonnet-20240229,claude-3-5-sonnet-20240620",
+	}
+	require.False(t, NormalizeDirectAnthropicChannelModels(cloudflare))
+	require.Equal(t, "claude-3-sonnet-20240229,claude-3-5-sonnet-20240620", cloudflare.Models)
+}
+
+func TestNormalizeDirectAnthropicPreparationModelsSkipsCloudflareBaseURL(t *testing.T) {
+	cloudflareBaseURL := "https://gateway.ai.cloudflare.com/v1/account/default/anthropic"
+	testModel := "claude-3-sonnet-20240229"
+	preparation := &ChannelPreparation{
+		Type:      constant.ChannelTypeAnthropic,
+		BaseURL:   &cloudflareBaseURL,
+		Models:    "claude-3-sonnet-20240229",
+		TestModel: &testModel,
+	}
+
+	require.False(t, NormalizeDirectAnthropicPreparationModels(preparation))
+	require.Equal(t, "claude-3-sonnet-20240229", preparation.Models)
+	require.Equal(t, "claude-3-sonnet-20240229", *preparation.TestModel)
 }
 
 func TestNormalizeRetiredDirectAnthropicModelsInDatabase(t *testing.T) {

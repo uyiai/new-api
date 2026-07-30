@@ -17,82 +17,44 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Banner,
   Button,
   Input,
   InputNumber,
   Modal,
-  Progress,
   Select,
   Table,
   TextArea,
   Typography,
 } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
+import { showError } from '../../../../helpers';
 import {
-  getChannelModels,
-  loadChannelModels,
-  showError,
-} from '../../../../helpers';
-import { appendKeyFragment } from '../keyFragment';
+  ANTHROPIC_IMPORT_PROFILE_OFFICIAL,
+  getAnthropicImportFormat,
+  getAnthropicImportPlaceholder,
+  getImportCredentialPreview,
+  getImportPreviewName,
+  parseAnthropicImportText,
+  useAnthropicImportProfiles,
+} from '../../../../hooks/channels/useAnthropicImportProfiles';
 
 const DEFAULT_GROUP = 'default';
-const ANTHROPIC_CHANNEL_TYPE = 14;
+
+const normalizeGroups = (value) => {
+  const values = Array.isArray(value) ? value : [value];
+  const groups = [
+    ...new Set(values.map((item) => String(item || '').trim())),
+  ].filter(Boolean);
+  return groups.length > 0 ? groups : [DEFAULT_GROUP];
+};
 
 const generateTimestamp = () => {
   const now = new Date();
   const pad = (value) => String(value).padStart(2, '0');
   return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}`;
-};
-
-const generateChannelName = (balance, suffix, timestamp, key) => {
-  return appendKeyFragment(`${timestamp}-${balance}-${suffix}`, key);
-};
-
-const normalizeGroups = (value) => {
-  const rawGroups = Array.isArray(value) ? value : [value];
-  const groups = rawGroups
-    .map((item) => String(item || '').trim())
-    .filter(Boolean);
-  const uniqueGroups = Array.from(new Set(groups));
-  return uniqueGroups.length > 0 ? uniqueGroups : [DEFAULT_GROUP];
-};
-
-const parseBatchInput = (text, suffix, timestamp) => {
-  const entries = [];
-  const errors = [];
-  text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .forEach((line, index) => {
-      const parts = line
-        .split(/\t+|\s{2,}/)
-        .map((item) => item.trim())
-        .filter(Boolean);
-      if (parts.length < 2) {
-        errors.push({ line: index + 1, message: '格式应为：余额<Tab>Key' });
-        return;
-      }
-      const balance = Number(parts[0]);
-      const key = parts.slice(1).join('').trim();
-      if (!key) {
-        errors.push({ line: index + 1, message: 'Key 不能为空' });
-        return;
-      }
-      entries.push({
-        name: generateChannelName(
-          Number.isFinite(balance) ? balance : 0,
-          suffix,
-          timestamp,
-          key,
-        ),
-        balance: Number.isFinite(balance) ? balance : 0,
-        key,
-      });
-    });
-  return { entries, errors };
 };
 
 const ImportPreparationModal = ({
@@ -102,94 +64,110 @@ const ImportPreparationModal = ({
   onSubmit,
 }) => {
   const { t } = useTranslation();
-  const [inputText, setInputText] = useState('');
+  const {
+    profiles,
+    selectedProfile,
+    selectedProfileID,
+    setSelectedProfileID,
+    inputText,
+    setInputText,
+    resetDrafts,
+    loading: profilesLoading,
+    loadError,
+  } = useAnthropicImportProfiles(visible);
   const [nameSuffix, setNameSuffix] = useState('');
-  const [models, setModels] = useState('');
+  const [modelDrafts, setModelDrafts] = useState({});
   const [groups, setGroups] = useState([DEFAULT_GROUP]);
+  const [tag, setTag] = useState('');
   const [priority, setPriority] = useState(0);
   const [weight, setWeight] = useState(0);
   const [importing, setImporting] = useState(false);
   const [results, setResults] = useState([]);
-  const timestamp = useMemo(() => generateTimestamp(), [visible]);
+  const [timestamp, setTimestamp] = useState(generateTimestamp());
 
   useEffect(() => {
-    if (!visible) return;
-    loadChannelModels().catch(() => {});
+    if (visible) setTimestamp(generateTimestamp());
   }, [visible]);
 
-  const defaultModels = useMemo(
-    () => getChannelModels(ANTHROPIC_CHANNEL_TYPE).join(','),
-    [],
-  );
-  const parsed = useMemo(
-    () => parseBatchInput(inputText, nameSuffix, timestamp),
-    [inputText, nameSuffix, timestamp],
+  const models = modelDrafts[selectedProfileID] || '';
+  const setModels = useCallback(
+    (value) => {
+      setModelDrafts((current) => ({
+        ...current,
+        [selectedProfileID]: value,
+      }));
+    },
+    [selectedProfileID],
   );
   const selectedGroups = useMemo(() => normalizeGroups(groups), [groups]);
+  const parsed = useMemo(
+    () => parseAnthropicImportText(inputText, selectedProfile),
+    [inputText, selectedProfile],
+  );
+  const previewRows = useMemo(
+    () =>
+      parsed.entries.map((entry, index) => ({
+        ...entry,
+        index,
+        name: getImportPreviewName(
+          entry,
+          selectedProfile,
+          nameSuffix.trim(),
+          timestamp,
+        ),
+        credentialPreview: getImportCredentialPreview(entry, selectedProfile),
+      })),
+    [parsed.entries, selectedProfile, nameSuffix, timestamp],
+  );
   const totalImportCount = parsed.entries.length * selectedGroups.length;
-  const totalBalance = useMemo(
-    () =>
-      parsed.entries.reduce((sum, entry) => sum + entry.balance, 0) *
-      selectedGroups.length,
-    [parsed.entries, selectedGroups.length],
-  );
-  const formattedTotalBalance = useMemo(
-    () =>
-      new Intl.NumberFormat(undefined, {
-        maximumFractionDigits: 6,
-      }).format(totalBalance),
-    [totalBalance],
-  );
-  const successResults = useMemo(
-    () => results.filter((item) => item.ok),
-    [results],
-  );
-  const failedResults = useMemo(
-    () => results.filter((item) => !item.ok),
-    [results],
-  );
-  const progress =
-    totalImportCount === 0
-      ? 0
-      : Math.round((successResults.length / totalImportCount) * 100);
+  const officialNeedsSuffix =
+    selectedProfileID === ANTHROPIC_IMPORT_PROFILE_OFFICIAL;
+  const canImport =
+    !importing &&
+    Boolean(selectedProfile) &&
+    parsed.entries.length > 0 &&
+    parsed.errors.length === 0 &&
+    (!officialNeedsSuffix || nameSuffix.trim().length > 0);
 
-  const reset = () => {
-    setInputText('');
+  const reset = useCallback(() => {
+    resetDrafts();
     setNameSuffix('');
-    setModels('');
+    setModelDrafts({});
     setGroups([DEFAULT_GROUP]);
+    setTag('');
     setPriority(0);
     setWeight(0);
     setResults([]);
     setImporting(false);
-  };
+  }, [resetDrafts]);
 
   const handleCancel = () => {
+    if (importing) return;
     reset();
     onCancel();
   };
 
   const handleImport = async () => {
-    if (parsed.entries.length === 0) return;
+    if (!canImport) return;
     setImporting(true);
     setResults([]);
     try {
-      const finalModels = models.trim();
-      const items = parsed.entries.flatMap((entry) =>
-        selectedGroups.map((group) => ({
-          name: entry.name,
-          type: ANTHROPIC_CHANNEL_TYPE,
-          key: entry.key,
-          models: finalModels,
-          group,
-          balance: entry.balance,
-          priority: Number(priority) || 0,
-          weight: Number(weight) || 0,
-          auto_ban: 1,
-          source: 'batch_import',
+      const finalModels =
+        models.trim() || (selectedProfile.default_models || []).join(',');
+      const importResults = await onSubmit({
+        profile_id: selectedProfileID,
+        target: 'preparation',
+        rows: parsed.entries.map(({ balance, credentials }) => ({
+          balance,
+          credentials,
         })),
-      );
-      const importResults = await onSubmit(items);
+        groups: selectedGroups,
+        tag: tag.trim(),
+        priority: Number(priority) || 0,
+        weight: Number(weight) || 0,
+        models: finalModels,
+        name_suffix: nameSuffix.trim(),
+      });
       setResults(importResults);
     } catch (error) {
       showError(error.message || t('导入失败'));
@@ -198,20 +176,29 @@ const ImportPreparationModal = ({
     }
   };
 
-  const previewColumns = [
+  const failedResults = results.filter((item) => !item.ok);
+  const createdCount = results.reduce(
+    (sum, item) => sum + (item.ok ? Number(item.created_count || 0) : 0),
+    0,
+  );
+  const columns = [
+    {
+      title: '#',
+      dataIndex: 'index',
+      width: 50,
+      render: (value) => value + 1,
+    },
     { title: t('名称'), dataIndex: 'name', key: 'name' },
-    { title: t('余额'), dataIndex: 'balance', key: 'balance', width: 100 },
+    { title: t('额度'), dataIndex: 'balance', key: 'balance', width: 90 },
     {
       title: t('分组'),
-      key: 'groups',
-      width: 160,
+      width: 150,
       render: () => selectedGroups.join(', '),
     },
     {
-      title: 'Key',
-      dataIndex: 'key',
-      key: 'key',
-      render: (value) => `${value.slice(0, 8)}...${value.slice(-4)}`,
+      title: t('凭证预览'),
+      dataIndex: 'credentialPreview',
+      width: 150,
     },
   ];
 
@@ -220,36 +207,69 @@ const ImportPreparationModal = ({
       title={t('导入候选渠道')}
       visible={visible}
       onCancel={handleCancel}
+      maskClosable={!importing}
+      closable={!importing}
       footer={
         <div className='flex justify-end gap-2'>
-          <Button onClick={handleCancel}>{t('关闭')}</Button>
+          <Button onClick={handleCancel} disabled={importing}>
+            {t('关闭')}
+          </Button>
           <Button
             type='primary'
             loading={importing}
-            disabled={parsed.entries.length === 0 || parsed.errors.length > 0}
+            disabled={!canImport}
             onClick={handleImport}
           >
-            {t('导入到备货池')}
+            {t('导入到备货池（{{count}} 个）', { count: totalImportCount })}
           </Button>
         </div>
       }
-      style={{ width: 860 }}
+      style={{ width: 900 }}
     >
-      <div className='space-y-3'>
-        <Typography.Text type='secondary'>
-          {t('每行格式：余额<Tab>Key。导入后只进入备货池，不会创建正式渠道。')}
-        </Typography.Text>
+      <div className='space-y-4'>
+        {loadError ? <Banner type='danger' description={loadError} /> : null}
+
+        <div>
+          <div className='mb-1 font-semibold'>{t('导入来源')}</div>
+          <Select
+            value={selectedProfileID}
+            loading={profilesLoading}
+            optionList={profiles.map((profile) => ({
+              value: profile.id,
+              label: t(profile.label),
+            }))}
+            onChange={setSelectedProfileID}
+            disabled={importing}
+            style={{ width: '100%' }}
+          />
+          <Typography.Text type='secondary' size='small'>
+            {t('当前格式：{{format}}', {
+              format: getAnthropicImportFormat(selectedProfile),
+            })}
+          </Typography.Text>
+        </div>
+
+        {officialNeedsSuffix ? (
+          <div>
+            <div className='mb-1 font-semibold'>{t('名称后缀')}</div>
+            <Input
+              value={nameSuffix}
+              onChange={setNameSuffix}
+              disabled={importing}
+            />
+          </div>
+        ) : null}
+
         <TextArea
           value={inputText}
           onChange={setInputText}
           rows={8}
-          placeholder={'12.5\tsk-ant-...'}
+          disabled={importing}
+          placeholder={getAnthropicImportPlaceholder(selectedProfile)}
+          style={{ fontFamily: 'monospace' }}
         />
-        <div className='grid grid-cols-1 md:grid-cols-4 gap-3'>
-          <div>
-            <div className='mb-1 font-semibold'>{t('名称后缀')}</div>
-            <Input value={nameSuffix} onChange={setNameSuffix} />
-          </div>
+
+        <div className='grid grid-cols-1 gap-3 md:grid-cols-4'>
           <div>
             <div className='mb-1 font-semibold'>{t('分组')}</div>
             <Select
@@ -259,16 +279,21 @@ const ImportPreparationModal = ({
               allowCreate
               filter
               showClear
-              placeholder={t('请选择分组')}
               onChange={(value) => setGroups(normalizeGroups(value))}
+              disabled={importing}
               style={{ width: '100%' }}
             />
+          </div>
+          <div>
+            <div className='mb-1 font-semibold'>{t('标签')}</div>
+            <Input value={tag} onChange={setTag} disabled={importing} />
           </div>
           <div>
             <div className='mb-1 font-semibold'>{t('优先级')}</div>
             <InputNumber
               value={priority}
               onChange={(value) => setPriority(value ?? 0)}
+              disabled={importing}
               style={{ width: '100%' }}
             />
           </div>
@@ -278,90 +303,87 @@ const ImportPreparationModal = ({
               value={weight}
               min={0}
               onChange={(value) => setWeight(value ?? 0)}
+              disabled={importing}
               style={{ width: '100%' }}
             />
           </div>
         </div>
+
         <div>
           <div className='mb-1 font-semibold'>{t('模型')}</div>
           <TextArea
             value={models}
             onChange={setModels}
-            rows={2}
-            placeholder={defaultModels || t('不填则使用 Claude 默认模型')}
+            rows={3}
+            disabled={importing}
+            placeholder={(selectedProfile?.default_models || []).join(',')}
           />
         </div>
+
         {parsed.errors.length > 0 ? (
-          <div className='text-red-500 text-sm'>
-            {parsed.errors
-              .map((error) => `#${error.line}: ${error.message}`)
+          <Banner
+            type='danger'
+            description={parsed.errors
+              .map((error) =>
+                error.code === 'balance'
+                  ? t('第 {{line}} 行额度无效', { line: error.line })
+                  : error.code === 'account_id'
+                    ? t('第 {{line}} 行 Cloudflare Account ID 无效', {
+                        line: error.line,
+                      })
+                    : t('第 {{line}} 行格式错误，应为 {{format}}', {
+                        line: error.line,
+                        format: getAnthropicImportFormat(selectedProfile),
+                      }),
+              )
               .join('；')}
-          </div>
+          />
         ) : null}
-        {parsed.entries.length > 0 ? (
-          <div className='flex flex-wrap items-center gap-6 rounded border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700'>
-            <span>
-              {t('Key 数量')}{' '}
-              <span className='font-semibold text-gray-900'>
-                {parsed.entries.length}
-              </span>
-            </span>
-            <span>
-              {t('分组数量')}{' '}
-              <span className='font-semibold text-gray-900'>
-                {selectedGroups.length}
-              </span>
-            </span>
-            <span>
-              {t('导入条数')}{' '}
-              <span className='font-semibold text-gray-900'>
-                {totalImportCount}
-              </span>
-            </span>
-            <span>
-              {t('总额度')}{' '}
-              <span className='font-semibold text-gray-900'>
-                {formattedTotalBalance}
-              </span>
-            </span>
-          </div>
+
+        {previewRows.length > 0 ? (
+          <>
+            <Typography.Text type='secondary'>
+              {t(
+                '共 {{rows}} 行，将在 {{groups}} 个分组中创建 {{count}} 个候选渠道',
+                {
+                  rows: previewRows.length,
+                  groups: selectedGroups.length,
+                  count: totalImportCount,
+                },
+              )}
+            </Typography.Text>
+            <Table
+              columns={columns}
+              dataSource={previewRows}
+              pagination={false}
+              size='small'
+              rowKey='index'
+            />
+          </>
         ) : null}
-        <Progress
-          percent={progress}
-          showInfo
-          style={{ display: results.length > 0 ? 'block' : 'none' }}
-        />
+
         {results.length > 0 ? (
-          <div className='rounded border border-gray-200 bg-gray-50 px-3 py-2 text-sm'>
-            <div className='font-semibold text-gray-900'>
-              {t('导入结果')}：{t('成功')} {successResults.length}，
-              {t('失败')} {failedResults.length}
-            </div>
-            {failedResults.length > 0 ? (
-              <div className='mt-1 text-red-500 space-y-1'>
-                {failedResults.slice(0, 10).map((item) => (
-                  <div key={`${item.index}-${item.name}`}>
-                    #{Number(item.index) + 1} {item.name || '-'}：{item.error}
-                  </div>
-                ))}
-                {failedResults.length > 10 ? (
-                  <div>
-                    {t('还有 {{count}} 条失败未显示').replace(
-                      '{{count}}',
-                      failedResults.length - 10,
-                    )}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
+          <Banner
+            type={failedResults.length === 0 ? 'success' : 'warning'}
+            description={
+              failedResults.length === 0
+                ? t('成功创建 {{count}} 个候选渠道', {
+                    count: createdCount,
+                  })
+                : t(
+                    '成功创建 {{success}} 个候选渠道，失败 {{fail}} 行：{{details}}',
+                    {
+                      success: createdCount,
+                      fail: failedResults.length,
+                      details: failedResults
+                        .slice(0, 5)
+                        .map((item) => `#${item.index + 1} ${item.error}`)
+                        .join('；'),
+                    },
+                  )
+            }
+          />
         ) : null}
-        <Table
-          columns={previewColumns}
-          dataSource={parsed.entries}
-          pagination={false}
-          size='small'
-        />
       </div>
     </Modal>
   );

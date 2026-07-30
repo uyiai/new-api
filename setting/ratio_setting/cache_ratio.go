@@ -80,6 +80,7 @@ var defaultCacheRatio = map[string]float64{
 	"claude-opus-4-8-high":                0.1,
 	"claude-opus-4-8-medium":              0.1,
 	"claude-opus-4-8-low":                 0.1,
+	"claude-opus-5":                       0.1,
 }
 
 var defaultCreateCacheRatio = map[string]float64{
@@ -124,6 +125,7 @@ var defaultCreateCacheRatio = map[string]float64{
 	"claude-opus-4-8-high":                1.25,
 	"claude-opus-4-8-medium":              1.25,
 	"claude-opus-4-8-low":                 1.25,
+	"claude-opus-5":                       1.25,
 }
 
 //var defaultCreateCacheRatio = map[string]float64{}
@@ -158,19 +160,23 @@ func UpdateCreateCacheRatioByJSONString(jsonStr string) error {
 
 // GetCacheRatio returns the cache ratio for a model
 func GetCacheRatio(name string) (float64, bool) {
-	ratio, ok := cacheRatioMap.Get(name)
-	if !ok {
-		return 1, false // Default to 1 if not found
+	name = FormatMatchingModelName(name)
+	for _, candidate := range ratioLookupCandidates(name) {
+		if ratio, ok := cacheRatioMap.Get(candidate); ok {
+			return ratio, true
+		}
 	}
-	return ratio, true
+	return 1, false // Default to 1 if not found
 }
 
 func GetCreateCacheRatio(name string) (float64, bool) {
-	ratio, ok := createCacheRatioMap.Get(name)
-	if !ok {
-		return 1.25, false // Default to 1.25 if not found
+	name = FormatMatchingModelName(name)
+	for _, candidate := range ratioLookupCandidates(name) {
+		if ratio, ok := createCacheRatioMap.Get(candidate); ok {
+			return ratio, true
+		}
 	}
-	return ratio, true
+	return 1.25, false // Default to 1.25 if not found
 }
 
 func GetCacheRatioCopy() map[string]float64 {

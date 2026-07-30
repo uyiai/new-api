@@ -17,341 +17,244 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  Modal,
+  Banner,
+  Button,
   Input,
   InputNumber,
+  Modal,
   Select,
-  Button,
-  Table,
-  Typography,
-  Banner,
-  Progress,
-  Tag,
   Space,
+  Table,
+  Tag,
   TextArea,
+  Typography,
 } from '@douyinfe/semi-ui';
 import { IconUpload } from '@douyinfe/semi-icons';
-import { API, showSuccess, showError } from '../../../../helpers';
-import { getChannelModels } from '../../../../helpers';
+import { API, showError, showSuccess } from '../../../../helpers';
+import {
+  ANTHROPIC_IMPORT_PROFILE_OFFICIAL,
+  getAnthropicImportFormat,
+  getAnthropicImportPlaceholder,
+  getImportCredentialPreview,
+  getImportPreviewName,
+  parseAnthropicImportText,
+  useAnthropicImportProfiles,
+} from '../../../../hooks/channels/useAnthropicImportProfiles';
 
 const { Text } = Typography;
-
-// ============================================================================
-// Constants
-// ============================================================================
-
-const ANTHROPIC_CHANNEL_TYPE = 14;
 const DEFAULT_GROUP = 'default';
 
-// ============================================================================
-// Helpers
-// ============================================================================
+const normalizeGroups = (value) => {
+  const values = Array.isArray(value) ? value : [value];
+  const groups = [
+    ...new Set(values.map((item) => String(item || '').trim())),
+  ].filter(Boolean);
+  return groups.length > 0 ? groups : [DEFAULT_GROUP];
+};
 
-function pad(n) {
-  return n.toString().padStart(2, '0');
-}
-
-function generateTimestamp() {
+const generateTimestamp = () => {
   const now = new Date();
+  const pad = (value) => String(value).padStart(2, '0');
   return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}`;
-}
+};
 
-function generateChannelName(balance, suffix, timestamp) {
-  return `${timestamp}-${balance}-${suffix}`;
-}
-
-function normalizeGroups(value) {
-  const rawGroups = Array.isArray(value) ? value : [value];
-  const groups = rawGroups
-    .map((item) => String(item || '').trim())
-    .filter(Boolean);
-  const uniqueGroups = Array.from(new Set(groups));
-  return uniqueGroups.length > 0 ? uniqueGroups : [DEFAULT_GROUP];
-}
-
-function parseBatchInput(text, suffix, timestamp) {
-  const lines = text.split('\n');
-  const entries = [];
-  const errors = [];
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-
-    // Support both tab and multi-space separation
-    const parts = line.split(/\t+|\s{2,}/);
-    if (parts.length < 2) {
-      errors.push(`${i + 1}: 格式错误，需要 "余额<Tab>密钥"`);
-      continue;
-    }
-
-    const balanceStr = parts[0].trim();
-    const key = parts.slice(1).join('').trim();
-
-    const balance = Number(balanceStr);
-    if (isNaN(balance)) {
-      errors.push(`${i + 1}: 余额无效 "${balanceStr}"`);
-      continue;
-    }
-
-    if (!key) {
-      errors.push(`${i + 1}: 密钥为空`);
-      continue;
-    }
-
-    entries.push({
-      balance,
-      key,
-      name: generateChannelName(balance, suffix, timestamp),
-      lineNumber: i + 1,
-    });
-  }
-
-  return { entries, errors };
-}
-
-// ============================================================================
-// Component
-// ============================================================================
-
-const BatchImportModal = ({ visible, groupOptions = [], onCancel, onSuccess }) => {
+const BatchImportModal = ({
+  visible,
+  groupOptions = [],
+  onCancel,
+  onSuccess,
+}) => {
   const { t } = useTranslation();
-
-  // Form state
-  const [inputText, setInputText] = useState('');
+  const {
+    profiles,
+    selectedProfile,
+    selectedProfileID,
+    setSelectedProfileID,
+    inputText,
+    setInputText,
+    resetDrafts,
+    loading: profilesLoading,
+    loadError,
+  } = useAnthropicImportProfiles(visible);
   const [nameSuffix, setNameSuffix] = useState('');
-  const [models, setModels] = useState('');
+  const [modelDrafts, setModelDrafts] = useState({});
   const [groups, setGroups] = useState([DEFAULT_GROUP]);
+  const [tag, setTag] = useState('');
   const [priority, setPriority] = useState(0);
   const [weight, setWeight] = useState(0);
-  // Import state
-  const [importState, setImportState] = useState('idle'); // idle | importing | done
+  const [importState, setImportState] = useState('idle');
   const [results, setResults] = useState([]);
-  const [progress, setProgress] = useState(0);
+  const [timestamp, setTimestamp] = useState(generateTimestamp());
 
-  // Generate timestamp once per modal open
-  const timestamp = useMemo(() => generateTimestamp(), [visible]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (visible) setTimestamp(generateTimestamp());
+  }, [visible]);
 
-  // Get default models for Anthropic
-  const defaultModels = useMemo(() => {
-    return getChannelModels(ANTHROPIC_CHANNEL_TYPE).join(',');
-  }, []);
-
-  // Parse input for preview
-  const parsed = useMemo(() => {
-    if (!inputText.trim() || !nameSuffix.trim()) {
-      return { entries: [], errors: [] };
-    }
-    return parseBatchInput(inputText, nameSuffix.trim(), timestamp);
-  }, [inputText, nameSuffix, timestamp]);
-
-  const selectedGroups = useMemo(() => normalizeGroups(groups), [groups]);
-
-  const importEntries = useMemo(
-    () =>
-      parsed.entries.flatMap((entry) =>
-        selectedGroups.map((group) => ({
-          ...entry,
-          group,
-          importKey: `${entry.lineNumber}-${group}`,
-        })),
-      ),
-    [parsed.entries, selectedGroups],
+  const models = modelDrafts[selectedProfileID] || '';
+  const setModels = useCallback(
+    (value) => {
+      setModelDrafts((current) => ({
+        ...current,
+        [selectedProfileID]: value,
+      }));
+    },
+    [selectedProfileID],
   );
+  const selectedGroups = useMemo(() => normalizeGroups(groups), [groups]);
+  const parsed = useMemo(
+    () => parseAnthropicImportText(inputText, selectedProfile),
+    [inputText, selectedProfile],
+  );
+  const previewRows = useMemo(
+    () =>
+      parsed.entries.map((entry, index) => ({
+        ...entry,
+        index,
+        name: getImportPreviewName(
+          entry,
+          selectedProfile,
+          nameSuffix.trim(),
+          timestamp,
+        ),
+        credentialPreview: getImportCredentialPreview(entry, selectedProfile),
+      })),
+    [parsed.entries, selectedProfile, nameSuffix, timestamp],
+  );
+  const totalImportCount = parsed.entries.length * selectedGroups.length;
+  const officialNeedsSuffix =
+    selectedProfileID === ANTHROPIC_IMPORT_PROFILE_OFFICIAL;
+  const canImport =
+    importState === 'idle' &&
+    Boolean(selectedProfile) &&
+    parsed.entries.length > 0 &&
+    parsed.errors.length === 0 &&
+    (!officialNeedsSuffix || nameSuffix.trim().length > 0);
 
-  // Reset all state
   const resetState = useCallback(() => {
-    setInputText('');
+    resetDrafts();
     setNameSuffix('');
-    setModels('');
+    setModelDrafts({});
     setGroups([DEFAULT_GROUP]);
+    setTag('');
     setPriority(0);
     setWeight(0);
     setImportState('idle');
     setResults([]);
-    setProgress(0);
-  }, []);
+  }, [resetDrafts]);
 
-  // Handle cancel
   const handleCancel = useCallback(() => {
     if (importState === 'importing') return;
     resetState();
     onCancel();
-  }, [importState, resetState, onCancel]);
+  }, [importState, onCancel, resetState]);
 
-  // Execute import
   const handleImport = useCallback(async () => {
-    if (importEntries.length === 0) return;
-
+    if (!canImport) return;
     setImportState('importing');
     setResults([]);
-    setProgress(0);
-
-    const finalModels = models.trim() || defaultModels;
-    const importResults = [];
-    const total = importEntries.length;
-
-    for (let i = 0; i < total; i++) {
-      const entry = importEntries[i];
-      try {
-        const res = await API.post('/api/channel/', {
-          mode: 'single',
-          channel: {
-            name: entry.name,
-            type: ANTHROPIC_CHANNEL_TYPE,
-            key: entry.key,
-            models: finalModels,
-            group: entry.group,
-            balance: entry.balance,
-            status: 1,
-            auto_ban: 1,
-            weight: Number(weight) || 0,
-            priority: Number(priority) || 0,
-          },
-        });
-
-        if (res.data.success) {
-          importResults.push({ entry, success: true });
-        } else {
-          importResults.push({
-            entry,
-            success: false,
-            error: res.data.message || '未知错误',
-          });
-        }
-      } catch (err) {
-        importResults.push({
-          entry,
-          success: false,
-          error: err?.response?.data?.message || err.message || '网络错误',
-        });
+    try {
+      const finalModels =
+        models.trim() || (selectedProfile.default_models || []).join(',');
+      const response = await API.post('/api/channel/import', {
+        profile_id: selectedProfileID,
+        target: 'channel',
+        rows: parsed.entries.map(({ balance, credentials }) => ({
+          balance,
+          credentials,
+        })),
+        groups: selectedGroups,
+        tag: tag.trim(),
+        priority: Number(priority) || 0,
+        weight: Number(weight) || 0,
+        models: finalModels,
+        name_suffix: nameSuffix.trim(),
+      });
+      if (!response.data?.success) {
+        throw new Error(response.data?.message || t('导入失败'));
       }
-
-      setProgress(i + 1);
-      setResults([...importResults]);
-    }
-
-    setImportState('done');
-
-    const successCount = importResults.filter((r) => r.success).length;
-    const failCount = importResults.filter((r) => !r.success).length;
-
-    if (failCount === 0) {
-      showSuccess(
-        t('成功导入 {{count}} 个渠道').replace('{{count}}', successCount),
+      const importResults = response.data.data?.results || [];
+      setResults(importResults);
+      setImportState('done');
+      const createdCount = importResults.reduce(
+        (sum, item) => sum + (item.ok ? Number(item.created_count || 0) : 0),
+        0,
       );
-    } else {
-      showError(
-        t('导入完成：成功 {{success}} 个，失败 {{fail}} 个')
-          .replace('{{success}}', successCount)
-          .replace('{{fail}}', failCount),
-      );
+      const failedCount = importResults.filter((item) => !item.ok).length;
+      if (failedCount === 0) {
+        showSuccess(t('成功导入 {{count}} 个渠道', { count: createdCount }));
+      } else {
+        showError(
+          t('导入完成：成功 {{success}} 个，失败 {{fail}} 行', {
+            success: createdCount,
+            fail: failedCount,
+          }),
+        );
+      }
+      onSuccess?.();
+    } catch (error) {
+      setImportState('idle');
+      showError(error.message || t('导入失败'));
     }
-
-    if (onSuccess) onSuccess();
   }, [
-    importEntries,
+    canImport,
     models,
-    defaultModels,
-    weight,
-    priority,
+    nameSuffix,
     onSuccess,
+    parsed.entries,
+    priority,
+    selectedGroups,
+    selectedProfile,
+    selectedProfileID,
     t,
+    tag,
+    weight,
   ]);
 
-  const canImport =
-    importState === 'idle' &&
-    importEntries.length > 0 &&
-    parsed.errors.length === 0 &&
-    nameSuffix.trim().length > 0;
-
-  const keyCount = parsed.entries.length;
-  const groupCount = selectedGroups.length;
-  const totalImportCount = importEntries.length;
-
-  const successCount = results.filter((r) => r.success).length;
-  const failCount = results.filter((r) => !r.success).length;
-
-  // Table columns for preview
   const columns = [
     {
       title: '#',
       dataIndex: 'index',
       width: 50,
-      render: (_, record, index) => index + 1,
+      render: (value) => value + 1,
     },
     {
       title: t('渠道名称'),
       dataIndex: 'name',
       width: 220,
-      render: (text) => (
-        <Text copyable style={{ fontFamily: 'monospace', fontSize: 12 }}>
-          {text}
-        </Text>
-      ),
+      render: (value) => <Text copyable>{value}</Text>,
     },
     {
-      title: t('余额'),
+      title: t('额度'),
       dataIndex: 'balance',
-      width: 80,
-      align: 'right',
-      render: (val) => `$${val}`,
+      width: 90,
     },
     {
       title: t('分组'),
-      dataIndex: 'group',
-      width: 100,
+      width: 150,
+      render: () => selectedGroups.join(', '),
     },
     {
-      title: t('密钥前缀'),
-      dataIndex: 'key',
-      render: (text) => (
-        <Text
-          style={{
-            fontFamily: 'monospace',
-            fontSize: 12,
-            color: 'var(--semi-color-text-2)',
-          }}
-        >
-          {text.substring(0, 20)}...
-        </Text>
-      ),
+      title: t('凭证预览'),
+      dataIndex: 'credentialPreview',
+      width: 150,
     },
   ];
-
-  // Add status column during import
-  if (importState !== 'idle') {
+  if (importState === 'done') {
     columns.push({
       title: t('状态'),
-      dataIndex: 'status',
-      width: 80,
-      align: 'center',
-      render: (_, record, index) => {
-        const result = results[index];
-        if (!result) {
-          return index < progress ? (
-            <Tag color='blue' size='small'>
-              {t('进行中')}
-            </Tag>
-          ) : (
-            <Tag color='grey' size='small'>
-              {t('等待')}
-            </Tag>
-          );
-        }
-        return result.success ? (
-          <Tag color='green' size='small'>
-            {t('成功')}
-          </Tag>
+      width: 90,
+      render: (_, record) => {
+        const result = results[record.index];
+        return result?.ok ? (
+          <Tag color='green'>{t('成功')}</Tag>
         ) : (
           <Tag
             color='red'
-            size='small'
             style={{ cursor: 'pointer' }}
-            onClick={() => showError(result.error)}
+            onClick={() => showError(result?.error || t('导入失败'))}
           >
             {t('失败')}
           </Tag>
@@ -372,7 +275,7 @@ const BatchImportModal = ({ visible, groupOptions = [], onCancel, onSuccess }) =
       onCancel={handleCancel}
       maskClosable={importState !== 'importing'}
       closable={importState !== 'importing'}
-      width={700}
+      width={760}
       footer={
         <Space>
           <Button onClick={handleCancel} disabled={importState === 'importing'}>
@@ -386,210 +289,158 @@ const BatchImportModal = ({ visible, groupOptions = [], onCancel, onSuccess }) =
               disabled={!canImport}
               loading={importState === 'importing'}
             >
-              {importState === 'importing'
-                ? t('导入中...')
-                : t('导入 ({{count}} 条)').replace(
-                    '{{count}}',
-                    totalImportCount,
-                  )}
+              {t('导入（将创建 {{count}} 个渠道）', {
+                count: totalImportCount,
+              })}
             </Button>
           )}
         </Space>
       }
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {/* Name Tag */}
-        <div>
-          <div style={{ marginBottom: 4, fontWeight: 600, fontSize: 14 }}>
-            {t('名称标签')}
-          </div>
-          <Input
-            placeholder={t('例如：liz')}
-            value={nameSuffix}
-            onChange={setNameSuffix}
-            disabled={importState !== 'idle'}
-          />
-          <div
-            style={{
-              fontSize: 12,
-              color: 'var(--semi-color-text-2)',
-              marginTop: 4,
-            }}
-          >
-            {t('渠道命名格式：{{format}}').replace(
-              '{{format}}',
-              `${timestamp}-{余额}-{标签}`,
-            )}
-          </div>
-        </div>
+      <div className='flex flex-col gap-4'>
+        {loadError ? <Banner type='danger' description={loadError} /> : null}
 
-        {/* Group */}
         <div>
-          <div style={{ marginBottom: 4, fontWeight: 600, fontSize: 14 }}>
-            {t('分组')}
-          </div>
+          <div className='mb-1 font-semibold'>{t('导入来源')}</div>
           <Select
-            placeholder='default'
-            value={groups}
-            optionList={groupOptions || []}
-            multiple
-            allowCreate
-            filter
-            showClear
-            onChange={(value) => setGroups(normalizeGroups(value))}
+            value={selectedProfileID}
+            loading={profilesLoading}
+            optionList={profiles.map((profile) => ({
+              value: profile.id,
+              label: t(profile.label),
+            }))}
+            onChange={setSelectedProfileID}
             disabled={importState !== 'idle'}
             style={{ width: '100%' }}
           />
+          <div className='mt-1 text-xs text-gray-500'>
+            {t('当前格式：{{format}}', {
+              format: getAnthropicImportFormat(selectedProfile),
+            })}
+          </div>
         </div>
 
-        {/* Priority and Weight */}
-        <div
-          style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}
-        >
+        {officialNeedsSuffix ? (
           <div>
-            <div style={{ marginBottom: 4, fontWeight: 600, fontSize: 14 }}>
-              {t('优先级')}
-            </div>
+            <div className='mb-1 font-semibold'>{t('名称标签')}</div>
+            <Input
+              value={nameSuffix}
+              onChange={setNameSuffix}
+              disabled={importState !== 'idle'}
+              placeholder={t('例如：liz')}
+            />
+          </div>
+        ) : null}
+
+        <div className='grid grid-cols-1 gap-3 md:grid-cols-2'>
+          <div>
+            <div className='mb-1 font-semibold'>{t('分组')}</div>
+            <Select
+              value={groups}
+              optionList={groupOptions || []}
+              multiple
+              allowCreate
+              filter
+              showClear
+              onChange={(value) => setGroups(normalizeGroups(value))}
+              disabled={importState !== 'idle'}
+              style={{ width: '100%' }}
+            />
+          </div>
+          <div>
+            <div className='mb-1 font-semibold'>{t('标签')}</div>
+            <Input
+              value={tag}
+              onChange={setTag}
+              disabled={importState !== 'idle'}
+              placeholder={t('可选，整批渠道使用同一标签')}
+            />
+          </div>
+          <div>
+            <div className='mb-1 font-semibold'>{t('优先级')}</div>
             <InputNumber
               value={priority}
               onChange={(value) => setPriority(value ?? 0)}
               disabled={importState !== 'idle'}
-              min={-999}
               style={{ width: '100%' }}
             />
           </div>
           <div>
-            <div style={{ marginBottom: 4, fontWeight: 600, fontSize: 14 }}>
-              {t('权重')}
-            </div>
+            <div className='mb-1 font-semibold'>{t('权重')}</div>
             <InputNumber
               value={weight}
+              min={0}
               onChange={(value) => setWeight(value ?? 0)}
               disabled={importState !== 'idle'}
-              min={0}
               style={{ width: '100%' }}
             />
           </div>
         </div>
 
-        {/* Input Data */}
         <div>
-          <div style={{ marginBottom: 4, fontWeight: 600, fontSize: 14 }}>
-            {t('导入数据')}{' '}
-            <Text type='tertiary' size='small'>
-              ({t('余额<Tab>密钥，每行一条')})
-            </Text>
-          </div>
+          <div className='mb-1 font-semibold'>{t('导入数据')}</div>
           <TextArea
-            placeholder={`139\tsk-ant-api03-xxxxx...\n114\tsk-ant-api03-yyyyy...`}
             value={inputText}
             onChange={setInputText}
             disabled={importState !== 'idle'}
-            autosize={{ minRows: 4, maxRows: 8 }}
+            placeholder={getAnthropicImportPlaceholder(selectedProfile)}
+            autosize={{ minRows: 5, maxRows: 10 }}
             style={{ fontFamily: 'monospace', fontSize: 12 }}
           />
         </div>
 
-        {/* Parse Errors */}
-        {parsed.errors.length > 0 && (
+        <div>
+          <div className='mb-1 font-semibold'>{t('模型')}</div>
+          <TextArea
+            value={models}
+            onChange={setModels}
+            disabled={importState !== 'idle'}
+            rows={3}
+            placeholder={(selectedProfile?.default_models || []).join(',')}
+          />
+        </div>
+
+        {parsed.errors.length > 0 ? (
           <Banner
             type='danger'
-            description={
-              <div>
-                <div style={{ fontWeight: 600, marginBottom: 4 }}>
-                  {t('解析错误')}
-                </div>
-                {parsed.errors.map((err, i) => (
-                  <div key={i} style={{ fontSize: 12 }}>
-                    {t('第 {{line}} 行', { line: '' })}
-                    {err}
-                  </div>
-                ))}
-              </div>
-            }
+            description={parsed.errors
+              .map((error) =>
+                error.code === 'balance'
+                  ? t('第 {{line}} 行额度无效', { line: error.line })
+                  : error.code === 'account_id'
+                    ? t('第 {{line}} 行 Cloudflare Account ID 无效', {
+                        line: error.line,
+                      })
+                    : t('第 {{line}} 行格式错误，应为 {{format}}', {
+                        line: error.line,
+                        format: getAnthropicImportFormat(selectedProfile),
+                      }),
+              )
+              .join('；')}
           />
-        )}
+        ) : null}
 
-        {/* Preview Table */}
-        {parsed.entries.length > 0 && (
-          <div>
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: 8,
-              }}
-            >
-              <Text strong>{t('预览')}</Text>
-              <Text type='tertiary' size='small'>
-                {t('Key 数量')} {keyCount} · {t('分组数量')} {groupCount} ·{' '}
-                {t('共 {{count}} 条').replace(
-                  '{{count}}',
-                  totalImportCount,
-                )}
-              </Text>
-            </div>
+        {previewRows.length > 0 ? (
+          <>
+            <Text type='tertiary'>
+              {t(
+                '共 {{rows}} 行，将在 {{groups}} 个分组中创建 {{count}} 个渠道',
+                {
+                  rows: previewRows.length,
+                  groups: selectedGroups.length,
+                  count: totalImportCount,
+                },
+              )}
+            </Text>
             <Table
               columns={columns}
-              dataSource={importEntries}
+              dataSource={previewRows}
               pagination={false}
               size='small'
-              bordered
-              style={{ maxHeight: 250, overflow: 'auto' }}
-              rowKey='importKey'
+              rowKey='index'
             />
-          </div>
-        )}
-
-        {/* Progress during import */}
-        {importState === 'importing' && (
-          <div>
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                marginBottom: 4,
-              }}
-            >
-              <Text size='small' type='tertiary'>
-                {t('导入中...')} {progress}/{totalImportCount}
-              </Text>
-              <Text size='small' type='tertiary'>
-                {Math.round((progress / totalImportCount) * 100)}%
-              </Text>
-            </div>
-            <Progress
-              percent={Math.round((progress / totalImportCount) * 100)}
-              showInfo={false}
-            />
-          </div>
-        )}
-
-        {/* Results summary */}
-        {importState === 'done' && (
-          <Banner
-            type={failCount === 0 ? 'success' : 'warning'}
-            description={
-              <Space>
-                <span>
-                  <Tag color='green' size='small' style={{ marginRight: 4 }}>
-                    {t('✓')}
-                  </Tag>
-                  {t('成功 {{count}} 个').replace('{{count}}', successCount)}
-                </span>
-                {failCount > 0 && (
-                  <span>
-                    <Tag color='red' size='small' style={{ marginRight: 4 }}>
-                      {t('✗')}
-                    </Tag>
-                    {t('失败 {{count}} 个').replace('{{count}}', failCount)}
-                  </span>
-                )}
-              </Space>
-            }
-          />
-        )}
+          </>
+        ) : null}
       </div>
     </Modal>
   );

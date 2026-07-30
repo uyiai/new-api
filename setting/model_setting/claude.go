@@ -19,12 +19,14 @@ type ClaudeSettings struct {
 	DefaultMaxTokens                      map[string]int                 `json:"default_max_tokens"`
 	ThinkingAdapterEnabled                bool                           `json:"thinking_adapter_enabled"`
 	ThinkingAdapterBudgetTokensPercentage float64                        `json:"thinking_adapter_budget_tokens_percentage"`
+	DefaultImportProfile                  string                         `json:"default_import_profile"`
 }
 
 // 默认配置
 var defaultClaudeSettings = ClaudeSettings{
 	HeadersSettings:        map[string]map[string][]string{},
 	ThinkingAdapterEnabled: true,
+	DefaultImportProfile:   "anthropic_official",
 	DefaultMaxTokens: map[string]int{
 		"default": 8192,
 	},

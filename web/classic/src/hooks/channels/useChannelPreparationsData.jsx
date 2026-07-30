@@ -93,7 +93,8 @@ export function useChannelPreparationsData() {
   const shouldStopBatchTestingRef = useRef(false);
   const shouldStopPreparationBatchTestingRef = useRef(false);
   const [testingPreparationIds, setTestingPreparationIds] = useState(new Set());
-  const [isPreparationBatchTesting, setIsPreparationBatchTesting] = useState(false);
+  const [isPreparationBatchTesting, setIsPreparationBatchTesting] =
+    useState(false);
   const [preparationBatchProgress, setPreparationBatchProgress] = useState({
     total: 0,
     finished: 0,
@@ -123,7 +124,11 @@ export function useChannelPreparationsData() {
         if (startTimestamp !== null) params.start_timestamp = startTimestamp;
         if (endTimestamp !== null) params.end_timestamp = endTimestamp;
       }
-      if (filter.type !== undefined && filter.type !== null && filter.type !== '') {
+      if (
+        filter.type !== undefined &&
+        filter.type !== null &&
+        filter.type !== ''
+      ) {
         params.type = filter.type;
       }
       if (
@@ -218,11 +223,14 @@ export function useChannelPreparationsData() {
     setShowEdit(true);
   }, [loadGroupOptions]);
 
-  const openEdit = useCallback((preparation) => {
-    loadGroupOptions();
-    setEditingPreparation(preparation);
-    setShowEdit(true);
-  }, [loadGroupOptions]);
+  const openEdit = useCallback(
+    (preparation) => {
+      loadGroupOptions();
+      setEditingPreparation(preparation);
+      setShowEdit(true);
+    },
+    [loadGroupOptions],
+  );
 
   const openImport = useCallback(() => {
     loadGroupOptions();
@@ -260,15 +268,23 @@ export function useChannelPreparationsData() {
   );
 
   const importPreparations = useCallback(
-    async (items) => {
-      const res = await API.post('/api/channel/preparations/import', { items });
+    async (payload) => {
+      const res = await API.post('/api/channel/import', payload);
       if (!res.data.success) {
         throw new Error(res.data.message || t('导入失败'));
       }
       const results = res.data.data?.results || [];
       const successCount = results.filter((item) => item.ok).length;
       const failedResults = results.filter((item) => !item.ok);
-      showSuccess(t('导入完成：{{count}} 条成功', { count: successCount }));
+      const createdCount = results.reduce(
+        (sum, item) => sum + (item.ok ? Number(item.created_count || 0) : 0),
+        0,
+      );
+      showSuccess(
+        t('导入完成：成功创建 {{count}} 个候选渠道', {
+          count: createdCount || successCount,
+        }),
+      );
       if (failedResults.length > 0) {
         showError(
           t('导入失败 {{count}} 条：{{details}}')
@@ -369,7 +385,10 @@ export function useChannelPreparationsData() {
           }
           return true;
         }
-        updateTestResult(PREPARATION_TEST_STATUS.FAILED, message || t('测试失败'));
+        updateTestResult(
+          PREPARATION_TEST_STATUS.FAILED,
+          message || t('测试失败'),
+        );
         if (!silent) showError(message || t('测试失败'));
         return false;
       } catch (error) {
@@ -448,7 +467,9 @@ export function useChannelPreparationsData() {
         }
         const pageItems = data?.items || [];
         items.push(
-          ...pageItems.filter((item) => item.status === PREPARATION_STATUS.PENDING),
+          ...pageItems.filter(
+            (item) => item.status === PREPARATION_STATUS.PENDING,
+          ),
         );
         totalCount = data?.total || 0;
         if (pageItems.length === 0 || page * size >= totalCount) break;
@@ -482,7 +503,9 @@ export function useChannelPreparationsData() {
           success: 0,
           fail: 0,
         });
-        showInfo(t('开始批量测试 {{count}} 个候选渠道', { count: targets.length }));
+        showInfo(
+          t('开始批量测试 {{count}} 个候选渠道', { count: targets.length }),
+        );
 
         const concurrencyLimit = 5;
         let successCount = 0;
@@ -500,7 +523,8 @@ export function useChannelPreparationsData() {
             ),
           );
           results.forEach((result) => {
-            if (result.status === 'fulfilled' && result.value) successCount += 1;
+            if (result.status === 'fulfilled' && result.value)
+              successCount += 1;
             else failCount += 1;
           });
           finishedCount += batch.length;

@@ -273,6 +273,8 @@ func SetApiRouter(router *gin.Engine) {
 			channelRoute.POST("/search/keys", middleware.DisableCache(), controller.SearchChannelsByKeys)
 			channelRoute.POST("/query-key/report", middleware.DisableCache(), controller.QueryChannelKeyReport)
 			channelRoute.POST("/query-key/test", middleware.DisableCache(), controller.QueryChannelKeyTest)
+			channelRoute.GET("/import/profiles", controller.GetChannelImportProfiles)
+			channelRoute.POST("/import", controller.ImportChannelsFromProfile)
 			channelRoute.GET("/models", controller.ChannelListModels)
 			channelRoute.GET("/models_enabled", controller.EnabledListModels)
 			channelRoute.GET("/preparations", controller.GetChannelPreparations)
