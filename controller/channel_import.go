@@ -176,6 +176,8 @@ func buildAnthropicImportRow(profile AnthropicImportProfile, request anthropicIm
 		TestModel: profile.DefaultTestModel,
 		Balance:   row.Balance,
 	}
+	timestamp := time.Now().Format("200601021504")
+	balance := strconv.FormatFloat(row.Balance, 'f', -1, 64)
 
 	switch profile.ID {
 	case AnthropicImportProfileOfficial:
@@ -187,8 +189,7 @@ func buildAnthropicImportRow(profile AnthropicImportProfile, request anthropicIm
 		if suffix == "" {
 			suffix = "Anthropic"
 		}
-		balance := strconv.FormatFloat(row.Balance, 'f', -1, 64)
-		built.Name = fmt.Sprintf("%s-%s-%s", time.Now().Format("200601021504"), balance, suffix)
+		built.Name = fmt.Sprintf("%s-%s-%s", timestamp, balance, suffix)
 	case AnthropicImportProfileCloudflare:
 		accountID := strings.TrimSpace(row.Credentials["account_id"])
 		if !cloudflareAccountIDPattern.MatchString(accountID) {
@@ -199,7 +200,7 @@ func buildAnthropicImportRow(profile AnthropicImportProfile, request anthropicIm
 			return built, fmt.Errorf("Cloudflare API Token 不能为空")
 		}
 		built.BaseURL = fmt.Sprintf("https://gateway.ai.cloudflare.com/v1/%s/default/anthropic", strings.ToLower(accountID))
-		built.Name = "Cloudflare-" + strings.ToLower(accountID[len(accountID)-8:])
+		built.Name = fmt.Sprintf("%s-%s-Cloudflare-%s", timestamp, balance, strings.ToLower(accountID[len(accountID)-8:]))
 		settingsJSON, err := common.Marshal(dto.ChannelOtherSettings{UpstreamProvider: AnthropicImportProfileCloudflare})
 		if err != nil {
 			return built, err
@@ -207,6 +208,9 @@ func buildAnthropicImportRow(profile AnthropicImportProfile, request anthropicIm
 		built.OtherSettings = string(settingsJSON)
 	default:
 		return built, fmt.Errorf("不支持的 Anthropic 导入来源")
+	}
+	if tag := strings.TrimSpace(request.Tag); tag != "" {
+		built.Name += "-" + tag
 	}
 	return built, nil
 }

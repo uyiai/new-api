@@ -92,7 +92,7 @@ func TestCloudflareProfileImportCreatesOneChannelPerGroupWithoutLeakingToken(t *
 	require.Equal(t, "claude-3-5-sonnet-20240620,claude-opus-5", channels[0].Models)
 	require.NotNil(t, channels[0].TestModel)
 	require.Equal(t, "claude-sonnet-4-6", *channels[0].TestModel)
-	require.Equal(t, "Cloudflare-89abcdef", channels[0].Name)
+	require.Regexp(t, `^\d{12}-12\.5-Cloudflare-89abcdef-cloudflare-import$`, channels[0].Name)
 	require.Equal(t, "cloudflare-import", channels[0].GetTag())
 	require.Equal(t, int64(3), channels[0].GetPriority())
 	require.Equal(t, 4, channels[0].GetWeight())
@@ -310,6 +310,7 @@ func TestOfficialAnthropicProfileImportKeepsOfficialLifecycleRules(t *testing.T)
 		}},
 		"groups":      []string{"default"},
 		"name_suffix": "official",
+		"tag":         "anthropic-tag",
 		"models":      "claude-3-5-sonnet-20240620,claude-opus-5",
 	})
 
@@ -321,7 +322,8 @@ func TestOfficialAnthropicProfileImportKeepsOfficialLifecycleRules(t *testing.T)
 	require.NoError(t, model.DB.First(&channel, "key = ?", "sk-ant-official-import").Error)
 	require.NotNil(t, channel.BaseURL)
 	require.Empty(t, *channel.BaseURL)
-	require.Contains(t, channel.Name, "-3-official")
+	require.Contains(t, channel.Name, "-3-official-anthropic-tag")
+	require.Equal(t, "anthropic-tag", channel.GetTag())
 	require.Equal(t, "claude-sonnet-4-6,claude-opus-5", channel.Models)
 }
 

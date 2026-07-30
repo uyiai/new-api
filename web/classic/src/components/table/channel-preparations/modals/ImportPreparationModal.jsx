@@ -114,10 +114,11 @@ const ImportPreparationModal = ({
           selectedProfile,
           nameSuffix.trim(),
           timestamp,
+          tag,
         ),
         credentialPreview: getImportCredentialPreview(entry, selectedProfile),
       })),
-    [parsed.entries, selectedProfile, nameSuffix, timestamp],
+    [parsed.entries, selectedProfile, nameSuffix, timestamp, tag],
   );
   const totalImportCount = parsed.entries.length * selectedGroups.length;
   const officialNeedsSuffix =

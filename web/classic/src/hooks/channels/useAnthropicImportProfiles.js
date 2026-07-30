@@ -93,12 +93,22 @@ export const getImportCredentialPreview = (entry, profile) => {
   return `${value.slice(0, 8)}…${value.slice(-4)}`;
 };
 
-export const getImportPreviewName = (entry, profile, nameSuffix, timestamp) => {
+export const getImportPreviewName = (
+  entry,
+  profile,
+  nameSuffix,
+  timestamp,
+  tag,
+) => {
+  let baseName;
   if (profile?.id === ANTHROPIC_IMPORT_PROFILE_CLOUDFLARE) {
     const accountID = entry?.credentials?.account_id || '';
-    return `Cloudflare-${accountID.slice(-8).toLowerCase()}`;
+    baseName = `${timestamp}-${entry.balance}-Cloudflare-${accountID.slice(-8).toLowerCase()}`;
+  } else {
+    baseName = `${timestamp}-${entry.balance}-${nameSuffix || 'Anthropic'}`;
   }
-  return `${timestamp}-${entry.balance}-${nameSuffix || 'Anthropic'}`;
+  const normalizedTag = String(tag || '').trim();
+  return normalizedTag ? `${baseName}-${normalizedTag}` : baseName;
 };
 
 export const useAnthropicImportProfiles = (visible) => {
