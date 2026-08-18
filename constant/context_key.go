@@ -63,6 +63,11 @@ const (
 	// It is not returned to end users, but can be persisted into consume/error logs for debugging.
 	ContextKeyAdminRejectReason ContextKey = "admin_reject_reason"
 
+	// ContextKeyStreamErrorForwarded marks that an upstream stream error event has already been
+	// forwarded verbatim to the client as a well-formed SSE event. The top-level relay error
+	// handler reads it to avoid emitting a second, duplicated error event.
+	ContextKeyStreamErrorForwarded ContextKey = "stream_error_forwarded"
+
 	// ContextKeyLanguage stores the user's language preference for i18n
 	ContextKeyLanguage ContextKey = "language"
 	ContextKeyIsStream ContextKey = "is_stream"

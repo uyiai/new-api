@@ -72,6 +72,32 @@ func ClaudeChunkData(c *gin.Context, resp dto.ClaudeResponse, data string) {
 	_ = FlushWriter(c)
 }
 
+// ClaudeErrorData emits a well-formed Claude `event: error` SSE frame.
+//
+// It exists for the case where the response body has already started streaming: at that point
+// the HTTP status and headers are committed, so writing a JSON body via c.JSON() would append
+// unframed bytes to the SSE stream (no `event:`/`data:` prefix, no blank-line terminator) and
+// clients would silently drop it.
+func ClaudeErrorData(c *gin.Context, claudeError types.ClaudeError) {
+	jsonData, err := common.Marshal(gin.H{"type": "error", "error": claudeError})
+	if err != nil {
+		common.SysError("error marshalling claude stream error: " + err.Error())
+		return
+	}
+	c.Render(-1, common.CustomEvent{Data: "event: error\n"})
+	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("data: %s\n", jsonData)})
+	_ = FlushWriter(c)
+}
+
+// OpenAIErrorData emits an OpenAI-style `data: {"error":...}` SSE frame for an already-started
+// stream. No [DONE] is sent afterwards: a client that ignored the error object would otherwise
+// read [DONE] as a successful completion.
+func OpenAIErrorData(c *gin.Context, openAIError types.OpenAIError) {
+	if err := ObjectData(c, gin.H{"error": openAIError}); err != nil {
+		common.SysError("error sending openai stream error: " + err.Error())
+	}
+}
+
 func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data string) {
 	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
 	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("data: %s", data)})

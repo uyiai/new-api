@@ -65,6 +65,47 @@ func geminiRelayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewA
 	return err
 }
 
+// writeRelayError renders a relay error to the client using the framing that matches what has
+// already been committed to the connection.
+//
+// A streaming response that has written at least one byte has its status and headers committed,
+// so c.JSON() would append an unframed JSON blob to the SSE stream — no `event:`/`data:` prefix,
+// no blank-line terminator — which clients silently drop. Such a response gets a well-formed SSE
+// error event instead. Non-stream requests keep the original JSON error body.
+func writeRelayError(c *gin.Context, relayFormat types.RelayFormat, newAPIError *types.NewAPIError, ws *websocket.Conn) {
+	if relayFormat == types.RelayFormatOpenAIRealtime {
+		// Realtime owns a hijacked socket and reports errors over the websocket.
+		helper.WssError(c, ws, newAPIError.ToOpenAIError())
+		return
+	}
+
+	if common.GetContextKeyBool(c, constant.ContextKeyIsStream) && c.Writer.Written() {
+		if common.GetContextKeyBool(c, constant.ContextKeyStreamErrorForwarded) {
+			// The channel layer already forwarded the upstream error event verbatim.
+			return
+		}
+		switch relayFormat {
+		case types.RelayFormatClaude:
+			helper.ClaudeErrorData(c, newAPIError.ToClaudeError())
+		default:
+			helper.OpenAIErrorData(c, newAPIError.ToOpenAIError())
+		}
+		return
+	}
+
+	switch relayFormat {
+	case types.RelayFormatClaude:
+		c.JSON(newAPIError.StatusCode, gin.H{
+			"type":  "error",
+			"error": newAPIError.ToClaudeError(),
+		})
+	default:
+		c.JSON(newAPIError.StatusCode, gin.H{
+			"error": newAPIError.ToOpenAIError(),
+		})
+	}
+}
+
 func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	requestId := c.GetString(common.RequestIdKey)
@@ -90,19 +131,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if newAPIError != nil {
 			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
 			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
-			switch relayFormat {
-			case types.RelayFormatOpenAIRealtime:
-				helper.WssError(c, ws, newAPIError.ToOpenAIError())
-			case types.RelayFormatClaude:
-				c.JSON(newAPIError.StatusCode, gin.H{
-					"type":  "error",
-					"error": newAPIError.ToClaudeError(),
-				})
-			default:
-				c.JSON(newAPIError.StatusCode, gin.H{
-					"error": newAPIError.ToOpenAIError(),
-				})
-			}
+			writeRelayError(c, relayFormat, newAPIError, ws)
 		}
 	}()
 

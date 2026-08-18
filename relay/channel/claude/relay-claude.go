@@ -38,6 +38,19 @@ func stopReasonClaude2OpenAI(reason string) string {
 	return reasonmap.ClaudeStopReasonToOpenAIFinishReason(reason)
 }
 
+// clientStreamStarted reports whether any response byte has already been written to the client.
+//
+// c.Writer.Written() is deliberately used instead of info.HasSendResponse(): StreamScannerHandler
+// calls info.SetFirstResponseTime() before handing a line to the data handler, so HasSendResponse()
+// is already true even when the error event is the very first chunk and nothing has been flushed.
+//
+// Caveat: with ping enabled, a ": PING" comment also flips Written() to true, which costs a retry
+// that would in fact have been safe. That is the intended trade — declining a legal retry is
+// recoverable, splicing two upstream streams into one response is not.
+func clientStreamStarted(c *gin.Context) bool {
+	return c != nil && c.Writer != nil && c.Writer.Written()
+}
+
 func maybeMarkClaudeRefusal(c *gin.Context, stopReason string) {
 	if c == nil {
 		return
@@ -834,6 +847,20 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		return types.NewError(err, types.ErrorCodeBadResponseBody)
 	}
 	if claudeError := claudeResponse.GetClaudeError(); claudeError != nil && claudeError.Type != "" {
+		// The upstream signalled a mid-stream error (e.g. OpenRouter's "Provider returned no
+		// content"). If bytes have already been written to the client, retrying on another
+		// channel would splice a second stream — and a second message_start — into the same
+		// connection, so retry must be suppressed and the upstream error forwarded verbatim.
+		if clientStreamStarted(c) {
+			if info.RelayFormat == types.RelayFormatClaude {
+				// claudeResponse.Type is "error" here, so this emits `event: error`.
+				helper.ClaudeChunkData(c, claudeResponse, data)
+				common.SetContextKey(c, constant.ContextKeyStreamErrorForwarded, true)
+			}
+			return types.WithClaudeError(*claudeError, http.StatusInternalServerError, types.ErrOptionWithSkipRetry())
+		}
+		// Nothing written yet, so the stream is still clean: keep the original behaviour and
+		// let the caller fail over to another channel.
 		return types.WithClaudeError(*claudeError, http.StatusInternalServerError)
 	}
 	if claudeResponse.StopReason != "" {
